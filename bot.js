@@ -1,8 +1,25 @@
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
+import http from "http";
 
 const token = process.env.TG_TOKEN;
+const PORT = process.env.PORT || 8000;
+
+if (!token) {
+  console.error("Telegram token missing!");
+  process.exit(1);
+}
+
 const bot = new TelegramBot(token, { polling: true });
+
+/* ===== HEALTH SERVER FOR KOYEB ===== */
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("Bot running");
+}).listen(PORT, () => {
+  console.log("Health server running on port", PORT);
+});
+/* ==================================== */
 
 const freeUsage = {};
 
@@ -21,18 +38,14 @@ bot.on("message", async (msg) => {
   if (!msg.text || msg.text.startsWith("/")) return;
 
   const userId = msg.from.id;
-
   if (!freeUsage[userId]) freeUsage[userId] = 0;
 
   if (freeUsage[userId] >= 5) {
     return bot.sendMessage(msg.chat.id, `
 ⚠️ Free limit reached.
 
-To continue:
-Pay 0.25 USDC on Base to:
+Pay 0.25 USDC on Base:
 0x6CB857A62f6a55239D67C6bD1A8ed5671605566D
-
-Then send your TX hash.
     `);
   }
 
@@ -47,7 +60,6 @@ Then send your TX hash.
     });
 
     const data = await response.json();
-
     freeUsage[userId]++;
 
     bot.sendMessage(msg.chat.id, `
