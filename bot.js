@@ -155,6 +155,8 @@ Remaining: ${scansLeft(user)}
 Type /help for detailed usage guide.`
   );
 });
+
+// ✅ Forced scan command (works even if normal messages fail)
 bot.onText(/\/scan (.+)/s, async (msg, match) => {
   try {
     const code = match?.[1] || "";
@@ -168,19 +170,7 @@ bot.onText(/\/scan (.+)/s, async (msg, match) => {
     await bot.sendMessage(msg.chat.id, "Scan failed (server error).");
   }
 });
-bot.onText(/\/scan (.+)/s, async (msg, match) => {
-  try {
-    const code = match?.[1] || "";
-    if (!code.trim()) {
-      await bot.sendMessage(msg.chat.id, "Send: /scan <your code>");
-      return;
-    }
-    await scanCode(msg.chat.id, msg.from.id, code);
-  } catch (e) {
-    console.error("SCAN CMD ERROR:", e);
-    await bot.sendMessage(msg.chat.id, "Scan failed (server error).");
-  }
-});
+
 bot.onText(/\/help/, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
@@ -215,6 +205,7 @@ After 5 free scans: /pay
 Commands:
 /start
 /help
+/scan <code>
 /balance
 /pay`
   );
@@ -235,15 +226,16 @@ bot.onText(/\/pay/, async (msg) => {
   );
 });
 
-// Default: scan any non-command message
+// Default: scan any non-command message (supports caption too)
 bot.on("message", async (msg) => {
-  if (!msg.text) return;
-  if (msg.text.startsWith("/")) return;
+  const text = msg.text || msg.caption || "";
+  if (!text) return;
+  if (text.startsWith("/")) return;
 
   try {
-    await scanCode(msg.chat.id, msg.from.id, msg.text);
+    await scanCode(msg.chat.id, msg.from.id, text);
   } catch (e) {
-    console.error(e);
+    console.error("MESSAGE HANDLER ERROR:", e);
     await bot.sendMessage(msg.chat.id, "Server error. Try again.");
   }
 });
