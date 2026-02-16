@@ -87,26 +87,24 @@ async function scanCode(chatId, telegramId, code) {
     );
     return;
   }
+async function callAnalyze(code) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000); // 15s hard timeout
 
-  const res = await callAnalyze(code);
-
-  if (res.status === 402) {
-    await bot.sendMessage(
-      chatId,
-      "❌ API returned 402. Check TEOS_BOT_KEY on BOTH services + redeploy MCP."
-    );
-    return;
+  try {
+    return await fetch(`${API_BASE_URL}/analyze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-teos-bot-key": TEOS_BOT_KEY,
+      },
+      body: JSON.stringify({ code, mode: "basic" }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
   }
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    await bot.sendMessage(
-      chatId,
-      `❌ API error ${res.status}\n${txt.slice(0, 200)}`
-    );
-    return;
-  }
-
+}
   const data = await res.json();
 
   // ✅ Correct scans-left display (recompute after increment)
