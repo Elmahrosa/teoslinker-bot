@@ -155,7 +155,19 @@ Remaining: ${scansLeft(user)}
 Type /help for detailed usage guide.`
   );
 });
-
+bot.onText(/\/scan (.+)/s, async (msg, match) => {
+  try {
+    const code = match?.[1] || "";
+    if (!code.trim()) {
+      await bot.sendMessage(msg.chat.id, "Send: /scan <your code>");
+      return;
+    }
+    await scanCode(msg.chat.id, msg.from.id, code);
+  } catch (e) {
+    console.error("SCAN CMD ERROR:", e);
+    await bot.sendMessage(msg.chat.id, "Scan failed (server error).");
+  }
+});
 bot.onText(/\/help/, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
