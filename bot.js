@@ -1,51 +1,50 @@
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
-import Database from "better-sqlite3";
+import fs from "fs/promises";
 
 const TG_TOKEN = process.env.TG_TOKEN;
 const API_BASE_URL = process.env.API_BASE_URL;
 const TEOS_BOT_KEY = process.env.TEOS_BOT_KEY;
 
 const PAY_TO =
-  process.env.PAY_TO ||
-  "0x6CB857A62f6a55239D67C6bD1A8ed5671605566D";
+  process.env.PAY_TO || "0x6CB857A62f6a55239D67C6bD1A8ed5671605566D";
 const PRICE_BASIC = Number(process.env.PRICE_BASIC || "0.25");
 
 if (!TG_TOKEN) throw new Error("Missing TG_TOKEN");
 if (!API_BASE_URL) throw new Error("Missing API_BASE_URL");
 if (!TEOS_BOT_KEY) throw new Error("Missing TEOS_BOT_KEY");
 
-const bot = new TelegramBot(TG_TOKEN, { polling: true });
+// ---- Simple persistent store (JSON file) ----
+const DB_FILE = "./data.json";
 
-// ---- DB (persistent free scans) ----
-const db = new Database("bot.db");
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    telegram_id INTEGER PRIMARY KEY,
-    scans_used INTEGER NOT NULL DEFAULT 0,
-    is_paid INTEGER NOT NULL DEFAULT 0
-  );
-`);
-
-const getUser = db.prepare("SELECT * FROM users WHERE telegram_id=?");
-const createUser = db.prepare(
-  "INSERT OR IGNORE INTO users (telegram_id) VALUES (?)"
-);
-const incScan = db.prepare(
-  "UPDATE users SET scans_used=scans_used+1 WHERE telegram_id=?"
-);
-
-function ensureUser(id) {
-  createUser.run(id);
-  return getUser.get(id);
+async function loadDB() {
+  try {
+    const raw = await fs.readFile(DB_FILE, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return { users: {} };
+  }
 }
 
-function scansLeft(u) {
-  if (u.is_paid) return "∞";
-  return Math.max(0, 5 - (u.scans_used || 0));
+async function saveDB(db) {
+  await fs.writeFile(DB_FILE, JSON.stringify(db, null, 2), "utf8");
 }
 
-// ---- MCP API call (trusted) ----
+async function getUser(telegramId) {
+  const db = await loadDB();
+  if (!db.users[telegramId]) {
+    db.users[telegramId] = { scans_used: 0, is_paid: false };
+    await saveDB(db);
+  }
+  return { db, user: db.users[telegramId] };
+}
+
+function scansLeft(user) {
+  if (user.is_paid) return "∞";
+  return Math.max(0, 5 - (user.scans_used || 0));
+}
+
+// ---- MCP call (trusted bypass header) ----
 async function callAnalyze(code) {
   return fetch(`${API_BASE_URL}/analyze`, {
     method: "POST",
@@ -57,10 +56,27 @@ async function callAnalyze(code) {
   });
 }
 
-async function scanCode(chatId, userId, code) {
-  const u = ensureUser(userId);
+// ---- Start bot (fix webhook/polling conflicts) ----
+const bot = new TelegramBot(TG_TOKEN, {
+  polling: {
+    autoStart: false,
+    params: { timeout: 30 },
+  },
+});
 
-  if (!u.is_paid && u.scans_used >= 5) {
+async function start() {
+  // Ensure no webhook is set + clear pending updates
+  await bot.deleteWebhook({ drop_pending_updates: true });
+
+  // Start polling
+  bot.startPolling();
+  console.log("Bot started polling ✅");
+}
+
+async function scanCode(chatId, telegramId, code) {
+  const { db, user } = await getUser(String(telegramId));
+
+  if (!user.is_paid && user.scans_used >= 5) {
     await bot.sendMessage(
       chatId,
       `⚠️ Free limit reached.\n\n💳 Unlock unlimited scans:\nAmount: ${PRICE_BASIC} USDC\nPay to: ${PAY_TO}\n\nUse /pay`
@@ -86,46 +102,74 @@ async function scanCode(chatId, userId, code) {
 
   const data = await res.json();
 
-  if (!u.is_paid) incScan.run(userId);
-
-  const u2 = ensureUser(userId);
-  const decision = data?.result?.decision || "UNKNOWN";
-  const risk = data?.result?.overallRisk || "Unknown";
+  if (!user.is_paid) {
+    user.scans_used = (user.scans_used || 0) + 1;
+    db.users[String(telegramId)] = user;
+    await saveDB(db);
+  }
 
   await bot.sendMessage(
     chatId,
-    `✅ Decision: ${decision}\n⚠️ Risk: ${risk}\n🎁 Scans left: ${scansLeft(u2)}`
+    `✅ Decision: ${data?.result?.decision || "UNKNOWN"}\n` +
+      `⚠️ Risk: ${data?.result?.overallRisk || "Unknown"}\n` +
+      `🎁 Scans left: ${scansLeft(user)}`
   );
 }
 
 // ---- Commands ----
 bot.onText(/\/start/, async (msg) => {
-  const userId = msg.from?.id;
-  if (!userId) return;
-
-  const u = ensureUser(userId);
+  const { user } = await getUser(String(msg.from.id));
   await bot.sendMessage(
     msg.chat.id,
-    `🏺 TEOS Risk Analyzer\n\nSend code here and I will scan it.\n\n🎁 Free scans: 5 total\nRemaining: ${scansLeft(u)}\n\nCommands:\n/balance\n/pay\n/help`
+    `🏺 TEOS Risk Analyzer\n\nSend code here and I will scan it.\n\n🎁 Free scans: 5 total\nRemaining: ${scansLeft(user)}\n\nCommands:\n/balance\n/pay\n/help`
   );
 });
 
 bot.onText(/\/help/, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
-    `🧭 How to use:\n\n1) Send code as a message\n2) I return risk decision\n3) After 5 scans → /pay\n\nCommands:\n/balance\n/pay`
+    `🧭 How to use:\n1) Send code as a message\n2) I return risk decision\n3) After 5 scans → /pay\n\nCommands:\n/balance\n/pay`
   );
 });
 
 bot.onText(/\/balance/, async (msg) => {
-  const userId = msg.from?.id;
-  if (!userId) return;
-
-  const u = ensureUser(userId);
+  const { user } = await getUser(String(msg.from.id));
   await bot.sendMessage(
     msg.chat.id,
-    `📊 Status\nPaid: ${u.is_paid ? "YES" : "NO"}\nScans used: ${u.scans_used}\nScans left: ${scansLeft(u)}`
+    `📊 Status\nPaid: ${user.is_paid ? "YES" : "NO"}\nScans used: ${user.scans_used}\nScans left: ${scansLeft(user)}`
   );
 });
 
-bot.on
+bot.onText(/\/pay/, async (msg) => {
+  await bot.sendMessage(
+    msg.chat.id,
+    `💳 Payment\n\nSend ${PRICE_BASIC} USDC to:\n${PAY_TO}\n\nAfter payment we will enable unlimited scans (auto verification comes next).`
+  );
+});
+
+// Default: scan any non-command message
+bot.on("message", async (msg) => {
+  if (!msg.text) return;
+  if (msg.text.startsWith("/")) return;
+  await scanCode(msg.chat.id, msg.from.id, msg.text);
+});
+
+// Handle polling errors (409 etc.)
+bot.on("polling_error", async (e) => {
+  console.error("Polling error:", e?.message || e);
+
+  // If conflict, wait then retry polling (often happens during redeploy)
+  if (String(e?.message || "").includes("409")) {
+    try {
+      await bot.stopPolling();
+    } catch {}
+    setTimeout(() => {
+      bot.startPolling();
+    }, 5000);
+  }
+});
+
+start().catch((e) => {
+  console.error("Startup failed:", e);
+  process.exit(1);
+});
