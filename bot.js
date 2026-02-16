@@ -126,12 +126,31 @@ async function scanCode(chatId, telegramId, code) {
 // ---- Commands ----
 bot.onText(/\/start/, async (msg) => {
   const { user } = await getUser(String(msg.from.id));
+
   await bot.sendMessage(
     msg.chat.id,
-    `🏺 TEOS Risk Analyzer\n\nSend code here and I will scan it.\n\n🎁 Free scans: 5 total\nRemaining: ${scansLeft(user)}\n\nCommands:\n/balance\n/pay\n/help`
+`🏺 TEOS MCP — Agent Code Risk Scanner
+
+Protect autonomous systems before they deploy.
+
+⚠️ Detect:
+• Prompt injection
+• Secret leaks
+• Unsafe eval()
+• Agent autonomy risks
+• Tool misuse patterns
+
+🎁 Free scans: 5
+Remaining: ${scansLeft(user)}
+
+📌 How to use:
+1) Paste any code snippet
+2) Receive risk classification
+3) Fix vulnerabilities before production
+
+Type /help for detailed usage guide.`
   );
 });
-
 bot.onText(/\/help/, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
