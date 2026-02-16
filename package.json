@@ -7,7 +7,6 @@
     "start": "node bot.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.5.0",
     "node-fetch": "^3.3.2",
     "node-telegram-bot-api": "^0.66.0"
   }
