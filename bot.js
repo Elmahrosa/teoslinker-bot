@@ -168,7 +168,15 @@ bot.onText(/\/scan (.+)/s, async (msg, match) => {
     await bot.sendMessage(msg.chat.id, "Scan failed (server error).");
   }
 });
-
+bot.onText(/\/ping/, async (msg) => {
+  try {
+    const res = await fetch(`${API_BASE_URL}/health`, { method: "GET" });
+    const txt = await res.text().catch(() => "");
+    await bot.sendMessage(msg.chat.id, `✅ API ping: ${res.status}\n${txt.slice(0,200)}`);
+  } catch (e) {
+    await bot.sendMessage(msg.chat.id, `❌ API ping failed: ${String(e?.message || e)}`); 
+  }
+});
 bot.onText(/\/help/, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
