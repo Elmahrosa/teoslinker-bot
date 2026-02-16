@@ -1,28 +1,20 @@
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
 
-// Environment variables
 const token = process.env.TG_TOKEN;
 if (!token) {
-  console.error("EFATAL: TG_TOKEN is missing. Set TG_TOKEN env var.");
+  console.error("FATAL: TG_TOKEN is missing");
   process.exit(1);
 }
 
 const API_BASE_URL = process.env.API_BASE_URL || "https://app.teosegypt.com";
-const TEOS_API_KEY = process.env.TEOS_API_KEY || ""; // optional
-
-// Initialize bot
 const bot = new TelegramBot(token, { polling: true });
-
-// In-memory free usage (resets on restart)
 const freeUsage = new Map();
 
-// /start command
 bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id;
   await bot.sendMessage(
-    chatId,
-`🏺 *TEOS Risk Analyzer*
+    msg.chat.id,
+    `🏺 *TEOS Risk Analyzer*
 
 🔍 Analyze your code before execution.
 🎁 You get *5 FREE scans*.
@@ -32,7 +24,6 @@ Send your code now (paste it as a message).`,
   );
 });
 
-// Handle messages
 bot.on("message", async (msg) => {
   if (!msg.text || msg.text.startsWith("/")) return;
 
@@ -42,62 +33,44 @@ bot.on("message", async (msg) => {
 
   const used = freeUsage.get(userId) || 0;
 
-  // Free limit check
   if (used >= 5) {
     return bot.sendMessage(
       chatId,
-`⚠️ Free limit reached.
+      `⚠️ Free limit reached.
 
-To continue:
-Pay 0.25 USDC on Base to:
-0x6CB857A62f6a55239D67C6bD1A8ed5671605566D
-
-Then send your TX hash.`
+Pay 0.25 USDC to:
+0x6CB857A62f6a55239D67C6bD1A8ed5671605566D`
     );
   }
 
   try {
-    const headers = { "Content-Type": "application/json" };
-    if (TEOS_API_KEY) headers["Authorization"] = `Bearer ${TEOS_API_KEY}`;
-
-    // ✅ Corrected fetch call
     const res = await fetch(`${API_BASE_URL}/analyze`, {
       method: "POST",
-      headers,
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: msg.text, mode: "basic" })
     });
 
-    // Handle Payment Required
     if (res.status === 402) {
-      return bot.sendMessage(
-        chatId,
-`❌ Analyze API error (402)\nPayment Required\n\nThis analysis endpoint requires access/payment.\nContact support or provide an API key.`
-      );
+      return bot.sendMessage(chatId, "❌ Payment required by API");
     }
 
-    const text = await res.text();
-    let data;
-    try { data = JSON.parse(text); } catch { data = { raw: text }; }
-
+    const data = await res.json();
     freeUsage.set(userId, used + 1);
 
-    const decision = data?.result?.decision ?? data?.decision ?? "ERROR";
-    const risk = data?.result?.overallRisk ?? data?.overallRisk ?? "Unknown";
+    const decision = data?.result?.decision || "ERROR";
+    const risk = data?.result?.overallRisk || "Unknown";
 
     await bot.sendMessage(
       chatId,
-`✅ Decision: *${decision}*
+      `✅ Decision: *${decision}*
 ⚠️ Risk: *${risk}*
-🎁 Free scans left: *${5 - (used + 1)}*`,
+🎁 Scans left: *${5 - (used + 1)}*`,
       { parse_mode: "Markdown" }
     );
   } catch (e) {
-    console.error("Analyze error:", e);
-    await bot.sendMessage(chatId, "Server error while analyzing. Try again.");
+    console.error(e);
+    await bot.sendMessage(chatId, "Server error. Try again.");
   }
 });
 
-// Reduce log spam on polling errors
-bot.on("polling_error", (e) => {
-  console.error("polling_error:", e?.message || e);
-});
+bot.on("polling_error", (e) => console.error("Polling error:", e.message));
