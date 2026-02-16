@@ -8,8 +8,8 @@ if (!token) {
 }
 
 const API_BASE_URL = process.env.API_BASE_URL || "https://app.teosegypt.com";
+const TEOS_API_KEY = process.env.TEOS_API_KEY || ""; // optional
 
-// Polling only (no webhook)
 const bot = new TelegramBot(token, { polling: true });
 
 // In-memory free usage (resets on restart)
@@ -36,14 +36,9 @@ bot.on("message", async (msg) => {
   const userId = msg.from?.id;
   if (!userId) return;
 
-  // Avoid counting very short noise
-  const codeText = msg.text.trim();
-  if (codeText.length < 5) {
-    return bot.sendMessage(chatId, "Send a code snippet (at least 5 chars).");
-  }
-
   const used = freeUsage.get(userId) || 0;
 
+  // Bot-level free limit
   if (used >= 5) {
     return bot.sendMessage(
       chatId,
@@ -51,40 +46,34 @@ bot.on("message", async (msg) => {
 
 To continue:
 Pay 0.25 USDC on Base to:
-\`0x6CB857A62f6a55239D67C6bD1A8ed5671605566D\`
+0x6CB857A62f6a55239D67C6bD1A8ed5671605566D
 
-Then send your TX hash.`,
-      { parse_mode: "Markdown" }
+Then send your TX hash.`
     );
   }
 
   try {
+    const headers = { "Content-Type": "application/json" };
+    if (TEOS_API_KEY) headers["Authorization"] = `Bearer ${TEOS_API_KEY}`;
+
     const res = await fetch(`${API_BASE_URL}/analyze`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: codeText, mode: "basic" }),
+      headers,
+      body: JSON.stringify({ code: msg.text, mode: "basic" })
     });
 
-    const raw = await res.text();
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      data = { raw };
-    }
-
-    // If API failed, do NOT consume a free scan
-    if (!res.ok) {
-      const hint = (data?.error || data?.message || raw || "").toString().slice(0, 500);
+    // Handle Payment Required from API
+    if (res.status === 402) {
       return bot.sendMessage(
         chatId,
-`❌ Analyze API error (${res.status})
-
-${hint || "No details."}`
+`❌ Analyze API error (402)\nPayment Required\n\nThis analysis endpoint requires access/payment.\nContact support or provide an API key.`
       );
     }
 
-    // Consume free scan only on success
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+
     freeUsage.set(userId, used + 1);
 
     const decision = data?.result?.decision ?? data?.decision ?? "ERROR";
@@ -103,7 +92,7 @@ ${hint || "No details."}`
   }
 });
 
-// Helpful: log polling errors (409/401 show here)
-bot.on("polling_error", (err) => {
-  console.error("polling_error:", err?.message || err);
+// Optional: reduce log spam on polling errors
+bot.on("polling_error", (e) => {
+  console.error("polling_error:", e?.message || e);
 });
