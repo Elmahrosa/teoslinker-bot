@@ -72,7 +72,6 @@ async function start() {
     console.error("Webhook clear failed:", e?.message || e);
   }
 
-  // Start polling
   bot.startPolling();
   console.log("Bot started polling ✅");
 }
@@ -80,6 +79,7 @@ async function start() {
 async function scanCode(chatId, telegramId, code) {
   const { db, user } = await getUser(String(telegramId));
 
+  // Free limit gate
   if (!user.is_paid && user.scans_used >= 5) {
     await bot.sendMessage(
       chatId,
@@ -109,17 +109,21 @@ async function scanCode(chatId, telegramId, code) {
 
   const data = await res.json();
 
+  // ✅ Correct scans-left display (recompute after increment)
+  let leftNow = scansLeft(user);
+
   if (!user.is_paid) {
     user.scans_used = (user.scans_used || 0) + 1;
     db.users[String(telegramId)] = user;
     await saveDB(db);
+    leftNow = scansLeft(user);
   }
 
   await bot.sendMessage(
     chatId,
     `✅ Decision: ${data?.result?.decision || "UNKNOWN"}\n` +
       `⚠️ Risk: ${data?.result?.overallRisk || "Unknown"}\n` +
-      `🎁 Scans left: ${scansLeft(user)}`
+      `🎁 Scans left: ${leftNow}`
   );
 }
 
@@ -151,10 +155,43 @@ Remaining: ${scansLeft(user)}
 Type /help for detailed usage guide.`
   );
 });
+
 bot.onText(/\/help/, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
-    `🧭 How to use:\n1) Send code as a message\n2) I return risk decision\n3) After 5 scans → /pay\n\nCommands:\n/balance\n/pay`
+`🧠 How To Use TEOS MCP
+
+TEOS MCP analyzes code for AI-agent risk BEFORE execution.
+
+━━━━━━━━━━━━━━━
+📥 1) Send Code
+Paste any snippet directly in this chat.
+
+Example:
+eval(userInput)
+
+━━━━━━━━━━━━━━━
+📊 2) Get Results
+You receive:
+• Decision: ALLOW / WARN / BLOCK
+• Overall risk level
+• Scans remaining
+
+━━━━━━━━━━━━━━━
+🎁 3) Free Scans
+Each user gets 5 free scans.
+Check anytime: /balance
+
+━━━━━━━━━━━━━━━
+💳 4) Unlock Unlimited
+After 5 free scans: /pay
+
+━━━━━━━━━━━━━━━
+Commands:
+/start
+/help
+/balance
+/pay`
   );
 });
 
@@ -162,9 +199,7 @@ bot.onText(/\/balance/, async (msg) => {
   const { user } = await getUser(String(msg.from.id));
   await bot.sendMessage(
     msg.chat.id,
-    `📊 Status\nPaid: ${user.is_paid ? "YES" : "NO"}\nScans used: ${
-      user.scans_used
-    }\nScans left: ${scansLeft(user)}`
+    `📊 Status\nPaid: ${user.is_paid ? "YES" : "NO"}\nScans used: ${user.scans_used}\nScans left: ${scansLeft(user)}`
   );
 });
 
@@ -190,17 +225,12 @@ bot.on("message", async (msg) => {
 
 // Handle polling errors (409 etc.)
 bot.on("polling_error", async (e) => {
-  console.error("Polling error:", e?.message || e);
+  const msg = String(e?.message || e);
+  console.error("Polling error:", msg);
 
-  if (String(e?.message || "").includes("409")) {
-    // conflict happens if another instance is polling
-    try {
-      await bot.stopPolling();
-    } catch {}
-
-    setTimeout(() => {
-      bot.startPolling();
-    }, 5000);
+  if (msg.includes("409")) {
+    console.error("❌ 409 Conflict: another instance is polling. Stop the other instance.");
+    process.exit(1);
   }
 });
 
