@@ -1,6 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
 
+// Environment variables
 const token = process.env.TG_TOKEN;
 if (!token) {
   console.error("EFATAL: TG_TOKEN is missing. Set TG_TOKEN env var.");
@@ -10,11 +11,13 @@ if (!token) {
 const API_BASE_URL = process.env.API_BASE_URL || "https://app.teosegypt.com";
 const TEOS_API_KEY = process.env.TEOS_API_KEY || ""; // optional
 
+// Initialize bot
 const bot = new TelegramBot(token, { polling: true });
 
 // In-memory free usage (resets on restart)
 const freeUsage = new Map();
 
+// /start command
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   await bot.sendMessage(
@@ -29,6 +32,7 @@ Send your code now (paste it as a message).`,
   );
 });
 
+// Handle messages
 bot.on("message", async (msg) => {
   if (!msg.text || msg.text.startsWith("/")) return;
 
@@ -38,7 +42,7 @@ bot.on("message", async (msg) => {
 
   const used = freeUsage.get(userId) || 0;
 
-  // Bot-level free limit
+  // Free limit check
   if (used >= 5) {
     return bot.sendMessage(
       chatId,
@@ -62,7 +66,7 @@ Then send your TX hash.`
       body: JSON.stringify({ code: msg.text, mode: "basic" })
     });
 
-    // Handle Payment Required from API
+    // Handle Payment Required
     if (res.status === 402) {
       return bot.sendMessage(
         chatId,
@@ -92,7 +96,7 @@ Then send your TX hash.`
   }
 });
 
-// Optional: reduce log spam on polling errors
+// Reduce log spam on polling errors
 bot.on("polling_error", (e) => {
   console.error("polling_error:", e?.message || e);
 });
