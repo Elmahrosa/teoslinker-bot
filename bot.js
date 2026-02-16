@@ -56,7 +56,7 @@ async function callAnalyze(code) {
   });
 }
 
-// ---- Start bot (fix webhook/polling conflicts) ----
+// ---- Start bot (polling + webhook clear) ----
 const bot = new TelegramBot(TG_TOKEN, {
   polling: {
     autoStart: false,
@@ -65,8 +65,12 @@ const bot = new TelegramBot(TG_TOKEN, {
 });
 
 async function start() {
-  // Ensure no webhook is set + clear pending updates
-  await bot.deleteWebhook({ drop_pending_updates: true });
+  // Clear webhook (compatible with older node-telegram-bot-api builds)
+  try {
+    await bot.setWebHook("");
+  } catch (e) {
+    console.error("Webhook clear failed:", e?.message || e);
+  }
 
   // Start polling
   bot.startPolling();
@@ -96,7 +100,10 @@ async function scanCode(chatId, telegramId, code) {
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    await bot.sendMessage(chatId, `❌ API error ${res.status}\n${txt.slice(0, 200)}`);
+    await bot.sendMessage(
+      chatId,
+      `❌ API error ${res.status}\n${txt.slice(0, 200)}`
+    );
     return;
   }
 
@@ -136,7 +143,9 @@ bot.onText(/\/balance/, async (msg) => {
   const { user } = await getUser(String(msg.from.id));
   await bot.sendMessage(
     msg.chat.id,
-    `📊 Status\nPaid: ${user.is_paid ? "YES" : "NO"}\nScans used: ${user.scans_used}\nScans left: ${scansLeft(user)}`
+    `📊 Status\nPaid: ${user.is_paid ? "YES" : "NO"}\nScans used: ${
+      user.scans_used
+    }\nScans left: ${scansLeft(user)}`
   );
 });
 
@@ -151,18 +160,25 @@ bot.onText(/\/pay/, async (msg) => {
 bot.on("message", async (msg) => {
   if (!msg.text) return;
   if (msg.text.startsWith("/")) return;
-  await scanCode(msg.chat.id, msg.from.id, msg.text);
+
+  try {
+    await scanCode(msg.chat.id, msg.from.id, msg.text);
+  } catch (e) {
+    console.error(e);
+    await bot.sendMessage(msg.chat.id, "Server error. Try again.");
+  }
 });
 
 // Handle polling errors (409 etc.)
 bot.on("polling_error", async (e) => {
   console.error("Polling error:", e?.message || e);
 
-  // If conflict, wait then retry polling (often happens during redeploy)
   if (String(e?.message || "").includes("409")) {
+    // conflict happens if another instance is polling
     try {
       await bot.stopPolling();
     } catch {}
+
     setTimeout(() => {
       bot.startPolling();
     }, 5000);
