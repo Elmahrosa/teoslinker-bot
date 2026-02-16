@@ -153,7 +153,22 @@ Remaining: ${scansLeft(user)}
 Type /help for detailed usage guide.`
   );
 });
+bot.onText(/\/scan (.+)/s, async (msg, match) => {
+  const code = match?.[1] || "";
+  if (!code.trim()) {
+    await bot.sendMessage(msg.chat.id, "Send: /scan <your code>");
+    return;
+  }
 
+  await bot.sendMessage(msg.chat.id, "🔎 Scanning...");
+
+  try {
+    await scanCode(msg.chat.id, msg.from.id, code);
+  } catch (e) {
+    console.error("SCAN CMD ERROR:", e);
+    await bot.sendMessage(msg.chat.id, `❌ Scan error: ${String(e?.message || e)}`);
+  }
+});
 // ✅ Forced scan command (works even if normal messages fail)
 bot.onText(/\/scan (.+)/s, async (msg, match) => {
   try {
