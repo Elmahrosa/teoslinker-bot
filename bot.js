@@ -1,75 +1,79 @@
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
-import http from "http";
 
 const token = process.env.TG_TOKEN;
-const PORT = process.env.PORT || 8000;
-
 if (!token) {
-  console.error("Telegram token missing!");
+  console.error("EFATAL: TG_TOKEN is missing. Set TG_TOKEN env var.");
   process.exit(1);
 }
 
+const API_BASE_URL = process.env.API_BASE_URL || "https://app.teosegypt.com";
 const bot = new TelegramBot(token, { polling: true });
 
-/* ===== HEALTH SERVER FOR KOYEB ===== */
-http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end("Bot running");
-}).listen(PORT, () => {
-  console.log("Health server running on port", PORT);
-});
-/* ==================================== */
+// In-memory free usage (resets on restart)
+const freeUsage = new Map();
 
-const freeUsage = {};
-
-bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, `
-🏺 TEOS Risk Analyzer
+bot.onText(/\/start/, async (msg) => {
+  const chatId = msg.chat.id;
+  await bot.sendMessage(
+    chatId,
+`🏺 *TEOS Risk Analyzer*
 
 🔍 Analyze your code before execution.
-🎁 You get 5 FREE scans.
+🎁 You get *5 FREE scans*.
 
-Send your code now.
-  `);
+Send your code now (paste it as a message).`,
+    { parse_mode: "Markdown" }
+  );
 });
 
 bot.on("message", async (msg) => {
   if (!msg.text || msg.text.startsWith("/")) return;
 
-  const userId = msg.from.id;
-  if (!freeUsage[userId]) freeUsage[userId] = 0;
+  const chatId = msg.chat.id;
+  const userId = msg.from?.id;
+  if (!userId) return;
 
-  if (freeUsage[userId] >= 5) {
-    return bot.sendMessage(msg.chat.id, `
-⚠️ Free limit reached.
+  const used = freeUsage.get(userId) || 0;
 
-Pay 0.25 USDC on Base:
+  if (used >= 5) {
+    return bot.sendMessage(
+      chatId,
+`⚠️ Free limit reached.
+
+To continue:
+Pay 0.25 USDC on Base to:
 0x6CB857A62f6a55239D67C6bD1A8ed5671605566D
-    `);
+
+Then send your TX hash.`,
+    );
   }
 
   try {
-    const response = await fetch("https://app.teosegypt.com/analyze", {
+    const res = await fetch(`${API_BASE_URL}/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: msg.text,
-        mode: "basic"
-      })
+      body: JSON.stringify({ code: msg.text, mode: "basic" })
     });
 
-    const data = await response.json();
-    freeUsage[userId]++;
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
-    bot.sendMessage(msg.chat.id, `
-Decision: ${data.result?.decision || "ERROR"}
-Risk: ${data.result?.overallRisk || "Unknown"}
+    freeUsage.set(userId, used + 1);
 
-Free scans left: ${5 - freeUsage[userId]}
-    `);
+    const decision = data?.result?.decision ?? data?.decision ?? "ERROR";
+    const risk = data?.result?.overallRisk ?? data?.overallRisk ?? "Unknown";
 
-  } catch (err) {
-    bot.sendMessage(msg.chat.id, "Server error.");
+    await bot.sendMessage(
+      chatId,
+`✅ Decision: *${decision}*
+⚠️ Risk: *${risk}*
+🎁 Free scans left: *${5 - (used + 1)}*`,
+      { parse_mode: "Markdown" }
+    );
+  } catch (e) {
+    console.error("Analyze error:", e);
+    await bot.sendMessage(chatId, "Server error while analyzing. Try again.");
   }
 });
