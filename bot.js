@@ -1,3 +1,4 @@
+console.log("BOT VERSION 1.0.1 LOADED ✅");
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
 import fs from "fs/promises";
