@@ -1,6 +1,8 @@
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
 import fs from "fs/promises";
+// Load environment variables from .env file for local development
+import 'dotenv/config';
 
 const TG_TOKEN = process.env.TG_TOKEN;
 const API_BASE_URL = process.env.API_BASE_URL; // example: https://app.teosegypt.com
@@ -51,10 +53,11 @@ function scansLeft(user) {
 }
 
 // ---- Owner helper ----
-function isOwnerMsg(msg: any) {
+// REMOVED TypeScript types from arguments
+function isOwnerMsg(msg) {
   return OWNER_ID && msg?.from?.id === OWNER_ID;
 }
-function isOwnerId(telegramId: number | string) {
+function isOwnerId(telegramId) {
   return OWNER_ID && Number(telegramId) === OWNER_ID;
 }
 
