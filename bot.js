@@ -1,10 +1,9 @@
-console.log("BOT VERSION 1.0.1 LOADED ✅");
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
 import fs from "fs/promises";
 
 const TG_TOKEN = process.env.TG_TOKEN;
-const API_BASE_URL = process.env.API_BASE_URL;
+const API_BASE_URL = process.env.API_BASE_URL; // example: https://app.teosegypt.com
 const TEOS_BOT_KEY = process.env.TEOS_BOT_KEY;
 
 const PAY_TO =
@@ -14,6 +13,8 @@ const PRICE_BASIC = Number(process.env.PRICE_BASIC || "0.25");
 if (!TG_TOKEN) throw new Error("Missing TG_TOKEN");
 if (!API_BASE_URL) throw new Error("Missing API_BASE_URL");
 if (!TEOS_BOT_KEY) throw new Error("Missing TEOS_BOT_KEY");
+
+console.log("BOT VERSION 1.0.1 LOADED ✅");
 
 // ---- Simple persistent store (JSON file) ----
 const DB_FILE = "./data.json";
@@ -45,24 +46,34 @@ function scansLeft(user) {
   return Math.max(0, 5 - (user.scans_used || 0));
 }
 
-// ---- MCP call (trusted bypass header) + HARD TIMEOUT ----
-async function callAnalyze(code) {
+// ---- HTTP helpers ----
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000); // 15s
-
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(`${API_BASE_URL}/analyze`, {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ---- MCP call (trusted bypass header) ----
+// IMPORTANT: confirm your real analyze path. If your API expects /api/v1/analyze, change ANALYZE_PATH.
+const ANALYZE_PATH = "/analyze"; // change to "/api/v1/analyze" if needed
+async function callAnalyze(code) {
+  const url = `${API_BASE_URL}${ANALYZE_PATH}`;
+  return fetchWithTimeout(
+    url,
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-teos-bot-key": TEOS_BOT_KEY,
       },
       body: JSON.stringify({ code, mode: "basic" }),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
+    },
+    15000
+  );
 }
 
 // ---- Start bot (polling + webhook clear) ----
@@ -74,7 +85,7 @@ const bot = new TelegramBot(TG_TOKEN, {
 });
 
 async function start() {
-  // Clear webhook (safe for older builds)
+  // Clear webhook (safe for polling)
   try {
     await bot.setWebHook("");
   } catch (e) {
@@ -85,6 +96,7 @@ async function start() {
   console.log("Bot started polling ✅");
 }
 
+// ---- Core scan logic ----
 async function scanCode(chatId, telegramId, code) {
   const { db, user } = await getUser(String(telegramId));
 
@@ -97,45 +109,40 @@ async function scanCode(chatId, telegramId, code) {
     return;
   }
 
+  await bot.sendMessage(chatId, "🔎 Scanning...");
+
   let res;
   try {
     res = await callAnalyze(code);
   } catch (e) {
-    const msg = String(e?.name || "").includes("AbortError")
-      ? "⏱️ API timeout (15s). Try again."
-      : `❌ API request failed: ${String(e?.message || e)}`;
-    await bot.sendMessage(chatId, msg);
+    await bot.sendMessage(chatId, `❌ API timeout/offline.\n${String(e?.message || e)}`);
     return;
   }
 
   if (res.status === 402) {
+    // this means MCP did NOT accept the bot key bypass
     await bot.sendMessage(
       chatId,
-      "❌ API returned 402. Check TEOS_BOT_KEY on BOTH services + redeploy MCP."
+      "❌ API returned 402 (Payment Required).\nFix TEOSMCP: allow x-teos-bot-key bypass OR disable requirePayment for bot."
     );
     return;
   }
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    await bot.sendMessage(
-      chatId,
-      `❌ API error ${res.status}\n${txt.slice(0, 200)}`
-    );
+    await bot.sendMessage(chatId, `❌ API error ${res.status}\n${txt.slice(0, 400)}`);
     return;
   }
 
   const data = await res.json().catch(() => ({}));
 
-  // Correct scans-left display (recompute after increment)
-  let leftNow = scansLeft(user);
-
+  // increment scans and recompute left
   if (!user.is_paid) {
     user.scans_used = (user.scans_used || 0) + 1;
     db.users[String(telegramId)] = user;
     await saveDB(db);
-    leftNow = scansLeft(user);
   }
+  const leftNow = scansLeft(user);
 
   await bot.sendMessage(
     chatId,
@@ -146,9 +153,8 @@ async function scanCode(chatId, telegramId, code) {
 }
 
 // ---- Commands ----
-bot.onText(/\/start/, async (msg) => {
+bot.onText(/^\/start$/, async (msg) => {
   const { user } = await getUser(String(msg.from.id));
-
   await bot.sendMessage(
     msg.chat.id,
 `🏺 TEOS MCP — Agent Code Risk Scanner
@@ -166,7 +172,7 @@ Protect autonomous systems before they deploy.
 Remaining: ${scansLeft(user)}
 
 📌 How to use:
-1) Paste any code snippet
+1) Paste any code snippet OR use /scan <code>
 2) Receive risk classification
 3) Fix vulnerabilities before production
 
@@ -174,75 +180,30 @@ Type /help for detailed usage guide.`
   );
 });
 
-// ✅ Forced scan command
-bot.onText(/\/scan (.+)/s, async (msg, match) => {
-  const code = match?.[1] || "";
-  if (!code.trim()) {
-    await bot.sendMessage(msg.chat.id, "Send: /scan <your code>");
-    return;
-  }
-
-  await bot.sendMessage(msg.chat.id, "🔎 Scanning...");
-  await scanCode(msg.chat.id, msg.from.id, code);
-});
-
-// ✅ API health check
-bot.onText(/\/ping/, async (msg) => {
-  try {
-    const res = await fetch(`${API_BASE_URL}/health`, { method: "GET" });
-    const txt = await res.text().catch(() => "");
-    await bot.sendMessage(
-      msg.chat.id,
-      `✅ API ping: ${res.status}\n${txt.slice(0, 200)}`
-    );
-  } catch (e) {
-    await bot.sendMessage(
-      msg.chat.id,
-      `❌ API ping failed: ${String(e?.message || e)}`
-    );
-  }
-});
-
-bot.onText(/\/help/, async (msg) => {
+bot.onText(/^\/help$/, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
 `🧠 How To Use TEOS MCP
 
-TEOS MCP analyzes code for AI-agent risk BEFORE execution.
+✅ Fast scan:
+  /scan <your code>
 
-━━━━━━━━━━━━━━━
-📥 1) Send Code
-Paste any snippet directly in this chat.
+✅ Or paste code directly as a normal message (no /)
 
 Example:
-/scan eval(userInput)
-
-━━━━━━━━━━━━━━━
-📊 2) Get Results
-• Decision: ALLOW / WARN / BLOCK
-• Overall risk level
-• Scans remaining
-
-━━━━━━━━━━━━━━━
-🎁 3) Free Scans
-Each user gets 5 free scans.
-Check anytime: /balance
-
-━━━━━━━━━━━━━━━
-💳 4) Unlock Unlimited
-After 5 free scans: /pay
+  /scan eval(userInput)
 
 Commands:
-/start
-/help
-/scan <code>
-/ping
-/balance
-/pay`
+/start - Start bot
+/help - Usage guide
+/scan - Scan code
+/ping - Check API status
+/balance - View scan usage
+/pay - Unlock unlimited scans`
   );
 });
 
-bot.onText(/\/balance/, async (msg) => {
+bot.onText(/^\/balance$/, async (msg) => {
   const { user } = await getUser(String(msg.from.id));
   await bot.sendMessage(
     msg.chat.id,
@@ -250,37 +211,50 @@ bot.onText(/\/balance/, async (msg) => {
   );
 });
 
-bot.onText(/\/pay/, async (msg) => {
+bot.onText(/^\/pay$/, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
     `💳 Payment\n\nSend ${PRICE_BASIC} USDC to:\n${PAY_TO}\n\nAfter payment we will enable unlimited scans (auto verification comes next).`
   );
 });
 
-// Default: scan any non-command message
+bot.onText(/^\/ping$/, async (msg) => {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/health`, { method: "GET" }, 8000);
+    const txt = await res.text().catch(() => "");
+    await bot.sendMessage(msg.chat.id, `✅ API ping: ${res.status}\n${txt.slice(0, 300)}`);
+  } catch (e) {
+    await bot.sendMessage(msg.chat.id, `❌ API ping failed: ${String(e?.message || e)}`);
+  }
+});
+
+// /scan <code> (supports single-line)
+bot.onText(/^\/scan(?:\s+([\s\S]+))?$/m, async (msg, match) => {
+  const code = (match?.[1] || "").trim();
+  if (!code) {
+    await bot.sendMessage(msg.chat.id, "Send like this:\n/scan eval(userInput)");
+    return;
+  }
+  await scanCode(msg.chat.id, msg.from.id, code);
+});
+
+// Default: scan any non-command text
 bot.on("message", async (msg) => {
-  const text = msg.text || msg.caption || "";
+  const text = msg.text || "";
   if (!text) return;
   if (text.startsWith("/")) return;
 
-  try {
-    await scanCode(msg.chat.id, msg.from.id, text);
-  } catch (e) {
-    console.error("MESSAGE HANDLER ERROR:", e);
-    await bot.sendMessage(msg.chat.id, "Server error. Try again.");
-  }
+  await scanCode(msg.chat.id, msg.from.id, text);
 });
 
-// Handle polling errors (409 etc.)
-bot.on("polling_error", async (e) => {
-  const m = String(e?.message || e);
-  console.error("Polling error:", m);
-
-  if (m.includes("409")) {
-    console.error("❌ 409 Conflict: another instance is polling. Exiting.");
-    process.exit(1);
-  }
+// Polling errors
+bot.on("polling_error", (e) => {
+  console.error("Polling error:", e?.message || e);
 });
+
+// Safety: don't die silently
+process.on("unhandledRejection", (err) => console.error("unhandledRejection:", err));
+process.on("uncaughtException", (err) => console.error("uncaughtException:", err));
 
 start().catch((e) => {
   console.error("Startup failed:", e);
