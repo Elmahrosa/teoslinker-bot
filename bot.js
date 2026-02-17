@@ -10,11 +10,15 @@ const PAY_TO =
   process.env.PAY_TO || "0x6CB857A62f6a55239D67C6bD1A8ed5671605566D";
 const PRICE_BASIC = Number(process.env.PRICE_BASIC || "0.25");
 
+// Founder/admin bypass ID (set this in Koyeb / env)
+const OWNER_ID = Number(process.env.TEOS_OWNER_ID || "0");
+
 if (!TG_TOKEN) throw new Error("Missing TG_TOKEN");
 if (!API_BASE_URL) throw new Error("Missing API_BASE_URL");
 if (!TEOS_BOT_KEY) throw new Error("Missing TEOS_BOT_KEY");
 
 console.log("BOT VERSION 1.0.1 LOADED ✅");
+console.log("OWNER_ID:", OWNER_ID || "not set");
 
 // ---- Simple persistent store (JSON file) ----
 const DB_FILE = "./data.json";
@@ -44,6 +48,14 @@ async function getUser(telegramId) {
 function scansLeft(user) {
   if (user.is_paid) return "∞";
   return Math.max(0, 5 - (user.scans_used || 0));
+}
+
+// ---- Owner helper ----
+function isOwnerMsg(msg: any) {
+  return OWNER_ID && msg?.from?.id === OWNER_ID;
+}
+function isOwnerId(telegramId: number | string) {
+  return OWNER_ID && Number(telegramId) === OWNER_ID;
 }
 
 // ---- HTTP helpers ----
@@ -97,10 +109,45 @@ async function start() {
 }
 
 // ---- Core scan logic ----
-async function scanCode(chatId, telegramId, code) {
+async function scanCode(chatId, telegramId, code, msgObj = null) {
   const { db, user } = await getUser(String(telegramId));
 
-  // Free limit gate
+  // Owner bypass: skip free-limit gate and do not increment scans
+  if (isOwnerId(telegramId)) {
+    await bot.sendMessage(chatId, "🔎 Scanning (Founder bypass)...");
+    let res;
+    try {
+      res = await callAnalyze(code);
+    } catch (e) {
+      await bot.sendMessage(chatId, `❌ API timeout/offline.\n${String(e?.message || e)}`);
+      return;
+    }
+
+    if (res.status === 402) {
+      await bot.sendMessage(
+        chatId,
+        "❌ API returned 402 (Payment Required).\nFix TEOSMCP: allow x-teos-bot-key bypass OR disable requirePayment for bot."
+      );
+      return;
+    }
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      await bot.sendMessage(chatId, `❌ API error ${res.status}\n${txt.slice(0, 400)}`);
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    await bot.sendMessage(
+      chatId,
+      `✅ Decision: ${data?.result?.decision || "UNKNOWN"}\n` +
+        `⚠️ Risk: ${data?.result?.overallRisk || "Unknown"}\n` +
+        `🎁 Scans left: ∞ (Founder)`
+    );
+    return;
+  }
+
+  // Free limit gate for normal users
   if (!user.is_paid && user.scans_used >= 5) {
     await bot.sendMessage(
       chatId,
@@ -204,6 +251,12 @@ Commands:
 });
 
 bot.onText(/^\/balance$/, async (msg) => {
+  // Owner sees infinite
+  if (isOwnerMsg(msg)) {
+    await bot.sendMessage(msg.chat.id, `📊 Status\nPaid: YES\nScans used: ∞\nScans left: ∞ (Founder bypass active)`);
+    return;
+  }
+
   const { user } = await getUser(String(msg.from.id));
   await bot.sendMessage(
     msg.chat.id,
@@ -212,6 +265,11 @@ bot.onText(/^\/balance$/, async (msg) => {
 });
 
 bot.onText(/^\/pay$/, async (msg) => {
+  if (isOwnerMsg(msg)) {
+    await bot.sendMessage(msg.chat.id, "Founder bypass active — no payment required.");
+    return;
+  }
+
   await bot.sendMessage(
     msg.chat.id,
     `💳 Payment\n\nSend ${PRICE_BASIC} USDC to:\n${PAY_TO}\n\nAfter payment we will enable unlimited scans (auto verification comes next).`
@@ -235,7 +293,7 @@ bot.onText(/^\/scan(?:\s+([\s\S]+))?$/m, async (msg, match) => {
     await bot.sendMessage(msg.chat.id, "Send like this:\n/scan eval(userInput)");
     return;
   }
-  await scanCode(msg.chat.id, msg.from.id, code);
+  await scanCode(msg.chat.id, msg.from.id, code, msg);
 });
 
 // Default: scan any non-command text
@@ -244,7 +302,7 @@ bot.on("message", async (msg) => {
   if (!text) return;
   if (text.startsWith("/")) return;
 
-  await scanCode(msg.chat.id, msg.from.id, text);
+  await scanCode(msg.chat.id, msg.from.id, text, msg);
 });
 
 // Polling errors
