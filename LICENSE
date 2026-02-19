@@ -1,0 +1,39 @@
+# MIT License
+
+Copyright © 2026 Elmahrosa International
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+## What This Means in Plain Language
+
+| Use Case | Permitted? |
+|----------|-----------|
+| Use for any purpose (personal, commercial) | ✅ Yes |
+| Modify and distribute | ✅ Yes |
+| Build a product on top of it | ✅ Yes |
+| Keep your modifications private | ✅ Yes |
+| Sublicense | ✅ Yes |
+| Hold Elmahrosa liable for damages | ❌ No |
+| Remove the copyright notice | ❌ No |
+
+---
+
+## Why MIT?
+
+`teoslinker-bot` is the open distribution layer of the TEOS ecosystem. We want developers, communities, and Pi Network builders to freely fork, extend, and deploy their own Telegram bots powered by the TeosMcp API. The only requirement is keeping this copyright notice intact.
+
+The commercial core of this system — the security analysis engine — lives in [agent-code-risk-mcp](https://github.com/Elmahrosa/agent-code-risk-mcp), which is licensed separately under the Business Source License 1.1.
+
+---
+
+## Attribution
+
+Built by [Elmahrosa International](https://github.com/Elmahrosa)  
+🌐 https://app.teosegypt.com  
+📬 Telegram: [@TeosLinkerBot](https://t.me/TeosLinkerBot)
