@@ -1,229 +1,145 @@
-<div align="center">
 
-# 🏺 TEOS Risk Analyzer Bot (TeosLinker)
-Telegram interface for **Agent Code Risk MCP (TEOS MCP)**  
-Paste code → Get **ALLOW / WARN / BLOCK** decision.
 
-**Powered by:** https://app.teosegypt.com  
-Built by **Elmahrosa** 🇪🇬 → global 🌍
+# 🏺 TEOS Linker Bot
 
-</div>
+Telegram gateway for **TEOS MCP — Agent Code Risk Scanner**
+
+This bot allows developers to scan code directly from Telegram using the live TEOS MCP engine.
+
+It acts as a secure gateway between Telegram users and the production MCP server.
 
 ---
 
-## ✅ What This Bot Does
+## 🚀 Live System Architecture
 
-This bot is a **thin client** that calls TEOS MCP over HTTP and returns the MCP decision.
+Telegram User  
+↓  
+TEOS Linker Bot (Koyeb Worker)  
+↓  
+TEOS MCP Server  
+↓  
+Decision Engine + Governance Layer  
 
-### Detects
-- Prompt injection patterns
-- Secret leaks
+---
+
+## 🔎 What It Detects
+
+- Prompt injection risks
+- Secret/API key leakage
 - Unsafe `eval()` / dynamic execution
-- Agent autonomy risks
-- Tool misuse patterns / dangerous primitives
-
-### Business logic
-- 🎁 **5 free scans** per Telegram user
-- 💳 After limit: show payment instructions
-- 👑 Founder bypass (owner ID)
-- 🧾 Usage tracking per Telegram ID (simple JSON DB)
+- Agent autonomy abuse
+- Tool misuse patterns
+- Governance violations
 
 ---
 
-## 🔗 Live MCP Server
+## 🎁 Free Tier
 
-- **Status page / endpoints:** https://app.teosegypt.com  
-- **Health:** `GET https://app.teosegypt.com/health`  
-- **Analyze:** `POST https://app.teosegypt.com/analyze`
-
----
-
-## 🤖 Bot Commands
-
-- `/start` — welcome + remaining scans
-- `/help` — usage guide
-- `/scan <code>` — scan snippet
-- paste code directly (no `/`) — also scans
-- `/ping` — check API status
-- `/balance` — view scans left
-- `/pay` — payment instructions
-- `/grant <telegramId>` — **admin only** manual unlock (until auto verification is added)
+- Default: 5 free scans
+- Rate limited (2 min cooldown)
+- Paid unlock for unlimited scans
 
 ---
 
-## 🧩 Requirements
+## 🔐 Security Features
 
-- Node.js 18+ (recommended)
-- Telegram bot token from **@BotFather**
-- TEOS MCP server URL (ex: `https://app.teosegypt.com`)
-- Internal bot bypass key (`TEOS_BOT_KEY`)
-- (Optional) Docker for container deploy
-
----
-
-## 🔐 Environment Variables
-
-Create a local `.env` file OR set these in Koyeb:
-
-| Variable | Example | Required |
-|---|---|---|
-| `TG_TOKEN` | `123:ABC...` | ✅ |
-| `API_BASE_URL` | `https://app.teosegypt.com` | ✅ |
-| `ANALYZE_PATH` | `/analyze` | ✅ |
-| `TEOS_BOT_KEY` | `your_internal_key` | ✅ |
-| `TEOS_OWNER_ID` | `123456789` | ✅ (for admin) |
-| `PAY_TO` | `0x6CB8...566D` | optional |
-| `PRICE_BASIC` | `0.25` | optional |
-
-### `.env.example`
-```env
-TG_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
-API_BASE_URL=https://app.teosegypt.com
-ANALYZE_PATH=/analyze
-TEOS_BOT_KEY=YOUR_INTERNAL_BOT_KEY
-TEOS_OWNER_ID=123456789
-
-PAY_TO=0x6CB857A62f6a55239D67C6bD1A8ed5671605566D
-PRICE_BASIC=0.25
-
+- Shared secret header (`x-teos-bot-key`)
+- Per-user rate limiting
+- Free-tier enforcement
+- Owner bypass control
+- Timeout-protected MCP calls
+- No secret logging
 
 ---
 
-🧪 Run Locally
+## 📦 Environment Variables (Koyeb)
 
-npm install
-node bot.js
+Required:
 
-Test in Telegram:
+TG_TOKEN API_BASE_URL TEOS_BOT_KEY
 
-1. Open your bot
+Optional / Configurable:
 
-
-2. Send: /scan eval(userInput)
-
-
-3. Send: import { exec } from "child_process"; exec("ls")
-
-
-
+ANALYZE_PATH=/analyze HEALTH_PATH=/health FREE_SCANS=5 RATE_LIMIT_SECONDS=120 PRICE_BASIC=0.25 PAY_TO=0x6CB857A62f6a55239D67C6bD1A8ed5671605566D TEOS_OWNER_ID=YOUR_TELEGRAM_ID
 
 ---
 
-🐳 Docker
+## 🛠 Deployment (Koyeb)
 
-Build
+- Service Type: Worker
+- Builder: Dockerfile
+- Instance: Nano (0.25 vCPU / 256MB RAM)
+- Region: EU (Paris or Frankfurt)
+- Scaling: Fixed (1 instance)
 
-docker build -t teoslinker-bot .
+After changing environment variables:
+→ Use **Without rebuild**
 
-Run
-
-docker run --rm \
-  -e TG_TOKEN="YOUR_TG_TOKEN" \
-  -e API_BASE_URL="https://app.teosegypt.com" \
-  -e ANALYZE_PATH="/analyze" \
-  -e TEOS_BOT_KEY="YOUR_INTERNAL_KEY" \
-  -e TEOS_OWNER_ID="123456789" \
-  -e PAY_TO="0x6CB857A62f6a55239D67C6bD1A8ed5671605566D" \
-  -e PRICE_BASIC="0.25" \
-  teoslinker-bot
-
+After changing code:
+→ Use **With build**
 
 ---
 
-☁️ Deploy on Koyeb (Recommended)
+## 🧠 Usage
 
-1) Create the app
+Start bot:
 
-Koyeb → Create App
+/start
 
-Source: GitHub
-
-Select repo: teoslinker-bot
-
-Build: Dockerfile (recommended) OR Node buildpack
-
-Run command: node bot.js (if using Node buildpack)
-
-
-2) Add Environment Variables in Koyeb
-
-Koyeb → App → Settings → Environment Variables → Add these:
-
-✅ Required:
-
-TG_TOKEN = <your bot token>
-
-API_BASE_URL = https://app.teosegypt.com
-
-ANALYZE_PATH = /analyze
-
-TEOS_BOT_KEY = <your internal bot key>
-
-TEOS_OWNER_ID = <your telegram numeric id>
-
-
-Optional:
-
-PAY_TO = 0x6CB857A62f6a55239D67C6bD1A8ed5671605566D
-
-PRICE_BASIC = 0.25
-
-
-3) Deploy
-
-Click Deploy.
-
-4) Validate
-
-Open Telegram and run:
-
-/ping
+Scan code:
 
 /scan eval(userInput)
 
+Or paste any code directly.
+
+Check status:
+
+/balance
+
+Check API:
+
+/ping
+
+---
+
+## ⚠️ Notes
+
+Filesystem storage uses `data.json`.  
+For production persistence, attach a Koyeb Volume or migrate to SQLite.
+
+---
+
+## 🔗 Powered by
+
+TEOS MCP  
+https://app.teosegypt.com
+
+---
+
+© Elmahrosa — Sovereign Agent Governance
 
 
 ---
 
-🔐 Security Notes (Important)
+✅ Your 8 Environment Variables (Final List)
 
-TEOS_BOT_KEY is a privileged bypass key — do not leak it
+In Koyeb → Settings → Environment Variables
 
-TEOS MCP should rate-limit requests and log:
+Add exactly these:
 
-x-teos-telegram-id
+TG_TOKEN=your_real_telegram_token
+API_BASE_URL=https://app.teosegypt.com
+TEOS_BOT_KEY=long_random_shared_secret_32+chars
+ANALYZE_PATH=/analyze
+HEALTH_PATH=/health
+FREE_SCANS=5
+RATE_LIMIT_SECONDS=120
+TEOS_OWNER_ID=8229874922
 
-decision + risk
+Optional monetization vars:
 
+PRICE_BASIC=0.25
+PAY_TO=0x6CB857A62f6a55239D67C6bD1A8ed5671605566D
 
-Payment verification is manual for now (/grant <telegramId>).
-Auto verification can be added by checking on-chain USDC transfers on Base.
-
-
-
----
-
-🗺 Roadmap
-
-✅ Thin-client MCP integration
-
-✅ Free-tier usage tracking
-
-✅ Manual unlock for paid users
-
-⏳ Auto on-chain payment verification (Base USDC)
-
-⏳ Public “Try It” demo mode + rate limits
-
-⏳ GitHub Action wrapper for CI/CD adoption
-
-
-
----
-
-📩 Contact / Disclosure
-
-Organization-wide security disclosure rules:
-https://github.com/Elmahrosa/.github/blob/main/SECURITY.md
 
 ---
