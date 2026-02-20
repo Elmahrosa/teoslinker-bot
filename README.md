@@ -1,10 +1,3 @@
- Below is a final production-ready README.md for your Telegram repo (Koyeb deploy + .env setup included).
-It assumes your repo is teoslinker-bot and entrypoint is bot.js.
-
-> ✅ It includes direct Koyeb env var setup (copy/paste), local .env, Docker, and quick test steps.
-
-
-
 <div align="center">
 
 # 🏺 TEOS Risk Analyzer Bot (TeosLinker)
@@ -234,5 +227,3 @@ Organization-wide security disclosure rules:
 https://github.com/Elmahrosa/.github/blob/main/SECURITY.md
 
 ---
-
-If you want, paste your **Dockerfile** here and I’ll ensure it matches Koyeb perfectly (entrypoint, port, node version, and persistence).0
