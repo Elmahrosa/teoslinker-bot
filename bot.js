@@ -1,28 +1,40 @@
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
 import fs from "fs/promises";
-// Load environment variables from .env file for local development
-import 'dotenv/config';
+import "dotenv/config";
+
+/**
+ * TEOS Risk Analyzer Bot
+ * Telegram thin-client for TEOS MCP
+ * - Calls TEOS MCP /analyze
+ * - 5 free scans per user
+ * - Paid unlock (manual grant for now; auto on-chain verify later)
+ */
 
 const TG_TOKEN = process.env.TG_TOKEN;
-const API_BASE_URL = process.env.API_BASE_URL; // example: https://app.teosegypt.com
+const API_BASE_URL = process.env.API_BASE_URL; // e.g. https://app.teosegypt.com
 const TEOS_BOT_KEY = process.env.TEOS_BOT_KEY;
 
 const PAY_TO =
   process.env.PAY_TO || "0x6CB857A62f6a55239D67C6bD1A8ed5671605566D";
 const PRICE_BASIC = Number(process.env.PRICE_BASIC || "0.25");
 
-// Founder/admin bypass ID (set this in Koyeb / env)
+// Admin / Founder Telegram ID (set in env)
 const OWNER_ID = Number(process.env.TEOS_OWNER_ID || "0");
+
+// MCP path
+const ANALYZE_PATH = process.env.ANALYZE_PATH || "/analyze";
 
 if (!TG_TOKEN) throw new Error("Missing TG_TOKEN");
 if (!API_BASE_URL) throw new Error("Missing API_BASE_URL");
 if (!TEOS_BOT_KEY) throw new Error("Missing TEOS_BOT_KEY");
 
-console.log("BOT VERSION 1.0.1 LOADED ✅");
+console.log("BOT VERSION 1.1.0 LOADED ✅");
+console.log("API_BASE_URL:", API_BASE_URL);
+console.log("ANALYZE_PATH:", ANALYZE_PATH);
 console.log("OWNER_ID:", OWNER_ID || "not set");
 
-// ---- Simple persistent store (JSON file) ----
+// ----------------- Simple persistent store -----------------
 const DB_FILE = "./data.json";
 
 async function loadDB() {
@@ -52,8 +64,6 @@ function scansLeft(user) {
   return Math.max(0, 5 - (user.scans_used || 0));
 }
 
-// ---- Owner helper ----
-// REMOVED TypeScript types from arguments
 function isOwnerMsg(msg) {
   return OWNER_ID && msg?.from?.id === OWNER_ID;
 }
@@ -61,7 +71,7 @@ function isOwnerId(telegramId) {
   return OWNER_ID && Number(telegramId) === OWNER_ID;
 }
 
-// ---- HTTP helpers ----
+// ----------------- HTTP helpers -----------------
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -72,10 +82,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   }
 }
 
-// ---- MCP call (trusted bypass header) ----
-// IMPORTANT: confirm your real analyze path. If your API expects /api/v1/analyze, change ANALYZE_PATH.
-const ANALYZE_PATH = "/analyze"; // change to "/api/v1/analyze" if needed
-async function callAnalyze(code) {
+// ----------------- MCP call -----------------
+async function callAnalyze(code, telegramId) {
   const url = `${API_BASE_URL}${ANALYZE_PATH}`;
   return fetchWithTimeout(
     url,
@@ -84,6 +92,8 @@ async function callAnalyze(code) {
       headers: {
         "Content-Type": "application/json",
         "x-teos-bot-key": TEOS_BOT_KEY,
+        // Optional metadata for logging / rate limiting server-side
+        "x-teos-telegram-id": String(telegramId || ""),
       },
       body: JSON.stringify({ code, mode: "basic" }),
     },
@@ -91,7 +101,47 @@ async function callAnalyze(code) {
   );
 }
 
-// ---- Start bot (polling + webhook clear) ----
+// ----------------- Result normalization -----------------
+function normalizeRisk(data) {
+  return String(data?.result?.overallRisk || "unknown").toLowerCase();
+}
+
+function normalizeDecision(data) {
+  const direct = String(data?.result?.decision || "").toUpperCase();
+  if (direct && direct !== "UNKNOWN") return direct;
+
+  const risk = normalizeRisk(data);
+  if (risk === "critical") return "BLOCK";
+  if (risk === "high") return "WARN";
+  if (risk === "medium") return "REVIEW";
+  if (risk === "low" || risk === "info") return "ALLOW";
+  return "REVIEW";
+}
+
+function pickReason(data) {
+  // Try common fields; fallback to categories if present
+  const top =
+    data?.result?.topFinding ||
+    data?.result?.reason ||
+    data?.result?.summary ||
+    null;
+
+  if (top) return String(top).slice(0, 120);
+
+  const cats = data?.result?.categories || data?.result?.tags || [];
+  if (Array.isArray(cats) && cats.length) return `Detected: ${String(cats[0])}`;
+  return "Detected risk patterns in code.";
+}
+
+function decisionEmoji(decision) {
+  if (decision === "BLOCK") return "⛔";
+  if (decision === "WARN") return "⚠️";
+  if (decision === "REVIEW") return "👀";
+  if (decision === "ALLOW") return "✅";
+  return "✅";
+}
+
+// ----------------- Start bot -----------------
 const bot = new TelegramBot(TG_TOKEN, {
   polling: {
     autoStart: false,
@@ -111,69 +161,45 @@ async function start() {
   console.log("Bot started polling ✅");
 }
 
-// ---- Core scan logic ----
-async function scanCode(chatId, telegramId, code, msgObj = null) {
+// ----------------- Core scan logic -----------------
+async function scanCode(chatId, telegramId, code) {
   const { db, user } = await getUser(String(telegramId));
 
-  // Owner bypass: skip free-limit gate and do not increment scans
+  // Founder bypass: no limit, no increment
   if (isOwnerId(telegramId)) {
     await bot.sendMessage(chatId, "🔎 Scanning (Founder bypass)...");
-    let res;
-    try {
-      res = await callAnalyze(code);
-    } catch (e) {
-      await bot.sendMessage(chatId, `❌ API timeout/offline.\n${String(e?.message || e)}`);
-      return;
-    }
-
-    if (res.status === 402) {
-      await bot.sendMessage(
-        chatId,
-        "❌ API returned 402 (Payment Required).\nFix TEOSMCP: allow x-teos-bot-key bypass OR disable requirePayment for bot."
-      );
-      return;
-    }
-
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      await bot.sendMessage(chatId, `❌ API error ${res.status}\n${txt.slice(0, 400)}`);
-      return;
-    }
-
-    const data = await res.json().catch(() => ({}));
-    await bot.sendMessage(
-      chatId,
-      `✅ Decision: ${data?.result?.decision || "UNKNOWN"}\n` +
-        `⚠️ Risk: ${data?.result?.overallRisk || "Unknown"}\n` +
-        `🎁 Scans left: ∞ (Founder)`
-    );
-    return;
+    return await doAnalyzeAndReply(chatId, telegramId, code, user, db, true);
   }
 
-  // Free limit gate for normal users
+  // Free limit gate
   if (!user.is_paid && user.scans_used >= 5) {
     await bot.sendMessage(
       chatId,
-      `⚠️ Free limit reached.\n\n💳 Unlock unlimited scans:\nAmount: ${PRICE_BASIC} USDC\nPay to: ${PAY_TO}\n\nUse /pay`
+      `⚠️ Free limit reached.\n\n💳 Unlock unlimited scans on Base:\nAmount: ${PRICE_BASIC} USDC\n\nUse /pay to see payment details.\nIf you already paid, message admin with your TX hash.`
     );
     return;
   }
 
   await bot.sendMessage(chatId, "🔎 Scanning...");
+  await doAnalyzeAndReply(chatId, telegramId, code, user, db, false);
+}
 
+async function doAnalyzeAndReply(chatId, telegramId, code, user, db, isFounder) {
   let res;
   try {
-    res = await callAnalyze(code);
+    res = await callAnalyze(code, telegramId);
   } catch (e) {
-    await bot.sendMessage(chatId, `❌ API timeout/offline.\n${String(e?.message || e)}`);
+    await bot.sendMessage(
+      chatId,
+      `❌ API timeout/offline.\n${String(e?.message || e)}`
+    );
     return;
   }
 
   if (res.status === 402) {
-    // this means MCP did NOT accept the bot key bypass
     await bot.sendMessage(
       chatId,
-      "❌ API returned 402 (Payment Required).\nFix TEOSMCP: allow x-teos-bot-key bypass OR disable requirePayment for bot."
+      "❌ API returned 402 (Payment Required).\nFix TEOS MCP: allow x-teos-bot-key bypass OR disable requirePayment for bot."
     );
     return;
   }
@@ -186,25 +212,33 @@ async function scanCode(chatId, telegramId, code, msgObj = null) {
 
   const data = await res.json().catch(() => ({}));
 
-  // increment scans and recompute left
-  if (!user.is_paid) {
+  // increment scans if normal user and not paid
+  if (!isFounder && !user.is_paid) {
     user.scans_used = (user.scans_used || 0) + 1;
     db.users[String(telegramId)] = user;
     await saveDB(db);
   }
-  const leftNow = scansLeft(user);
+
+  const decision = normalizeDecision(data);
+  const risk = normalizeRisk(data);
+  const reason = pickReason(data);
+
+  const leftNow = isFounder ? "∞ (Founder)" : scansLeft(user);
 
   await bot.sendMessage(
     chatId,
-    `✅ Decision: ${data?.result?.decision || "UNKNOWN"}\n` +
-      `⚠️ Risk: ${data?.result?.overallRisk || "Unknown"}\n` +
-      `🎁 Scans left: ${leftNow}`
+    `${decisionEmoji(decision)} Decision: ${decision}\n` +
+      `⚠️ Risk: ${risk.toUpperCase()}\n` +
+      `🧠 Reason: ${reason}\n` +
+      `🎁 Scans left: ${leftNow}\n\n` +
+      `Powered by TEOS MCP: ${API_BASE_URL}`
   );
 }
 
-// ---- Commands ----
+// ----------------- Commands -----------------
 bot.onText(/^\/start$/, async (msg) => {
   const { user } = await getUser(String(msg.from.id));
+
   await bot.sendMessage(
     msg.chat.id,
 `🏺 TEOS MCP — Agent Code Risk Scanner
@@ -223,8 +257,8 @@ Remaining: ${scansLeft(user)}
 
 📌 How to use:
 1) Paste any code snippet OR use /scan <code>
-2) Receive risk classification
-3) Fix vulnerabilities before production
+2) Receive ALLOW / WARN / BLOCK decision
+3) Fix risks before production
 
 Type /help for detailed usage guide.`
   );
@@ -249,14 +283,18 @@ Commands:
 /scan - Scan code
 /ping - Check API status
 /balance - View scan usage
-/pay - Unlock unlimited scans`
+/pay - Payment info
+/grant - (Admin) unlock user
+`
   );
 });
 
 bot.onText(/^\/balance$/, async (msg) => {
-  // Owner sees infinite
   if (isOwnerMsg(msg)) {
-    await bot.sendMessage(msg.chat.id, `📊 Status\nPaid: YES\nScans used: ∞\nScans left: ∞ (Founder bypass active)`);
+    await bot.sendMessage(
+      msg.chat.id,
+      `📊 Status\nPaid: YES\nScans used: ∞\nScans left: ∞ (Founder bypass active)`
+    );
     return;
   }
 
@@ -275,7 +313,7 @@ bot.onText(/^\/pay$/, async (msg) => {
 
   await bot.sendMessage(
     msg.chat.id,
-    `💳 Payment\n\nSend ${PRICE_BASIC} USDC to:\n${PAY_TO}\n\nAfter payment we will enable unlimited scans (auto verification comes next).`
+    `💳 Payment (Base / USDC)\n\nSend ${PRICE_BASIC} USDC to:\n${PAY_TO}\n\nAfter payment: send your TX hash to admin to unlock (auto verification coming next).`
   );
 });
 
@@ -289,14 +327,32 @@ bot.onText(/^\/ping$/, async (msg) => {
   }
 });
 
-// /scan <code> (supports single-line)
+// Admin manual unlock: /grant <telegramId>
+bot.onText(/^\/grant(?:\s+(\d+))?$/m, async (msg, match) => {
+  if (!isOwnerMsg(msg)) return;
+
+  const target = (match?.[1] || "").trim();
+  if (!target) {
+    await bot.sendMessage(msg.chat.id, "Usage: /grant <telegramId>");
+    return;
+  }
+
+  const { db, user } = await getUser(String(target));
+  user.is_paid = true;
+  db.users[String(target)] = user;
+  await saveDB(db);
+
+  await bot.sendMessage(msg.chat.id, `✅ Granted unlimited scans to user ${target}`);
+});
+
+// /scan <code>
 bot.onText(/^\/scan(?:\s+([\s\S]+))?$/m, async (msg, match) => {
   const code = (match?.[1] || "").trim();
   if (!code) {
     await bot.sendMessage(msg.chat.id, "Send like this:\n/scan eval(userInput)");
     return;
   }
-  await scanCode(msg.chat.id, msg.from.id, code, msg);
+  await scanCode(msg.chat.id, msg.from.id, code);
 });
 
 // Default: scan any non-command text
@@ -304,8 +360,7 @@ bot.on("message", async (msg) => {
   const text = msg.text || "";
   if (!text) return;
   if (text.startsWith("/")) return;
-
-  await scanCode(msg.chat.id, msg.from.id, text, msg);
+  await scanCode(msg.chat.id, msg.from.id, text);
 });
 
 // Polling errors
@@ -313,7 +368,6 @@ bot.on("polling_error", (e) => {
   console.error("Polling error:", e?.message || e);
 });
 
-// Safety: don't die silently
 process.on("unhandledRejection", (err) => console.error("unhandledRejection:", err));
 process.on("uncaughtException", (err) => console.error("uncaughtException:", err));
 
