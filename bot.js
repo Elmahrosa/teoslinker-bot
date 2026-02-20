@@ -4,134 +4,123 @@ import fs from "fs/promises";
 import "dotenv/config";
 
 /**
- * =========================
- * ENV
- * =========================
- * Required:
- * - TG_TOKEN
- * - API_BASE_URL        (example: https://app.teosegypt.com)
- * - TEOS_BOT_KEY        (shared secret that MCP accepts via x-teos-bot-key)
- *
- * Optional:
- * - ANALYZE_PATH        (default: /analyze)
- * - HEALTH_PATH         (default: /health)
- * - PAY_TO              (default: your wallet)
- * - PRICE_BASIC         (default: 0.25)
- * - TEOS_OWNER_ID       (telegram numeric id to bypass limits)
- * - FREE_SCANS          (default: 5)
- * - RATE_LIMIT_SECONDS  (default: 120)
+ * TEOS Risk Analyzer Bot (Free Tier funnel)
+ * - 5 free scans per account (lifetime)
+ * - After that: pay-per-scan messaging (pricing list)
+ * - Founder bypass (OWNER_ID) can scan unlimited without consuming quota
+ * - Rate limiting per user (anti-spam)
+ * - Stable DB with atomic writes
  */
 
+// ---- ENV ----
 const TG_TOKEN = process.env.TG_TOKEN;
-const API_BASE_URL = process.env.API_BASE_URL;
-const TEOS_BOT_KEY = process.env.TEOS_BOT_KEY;
-
+const API_BASE_URL = process.env.API_BASE_URL; // e.g. https://app.teosegypt.com
+const TEOS_BOT_KEY = process.env.TEOS_BOT_KEY; // bot bypass key for MCP
 const ANALYZE_PATH = process.env.ANALYZE_PATH || "/analyze";
-const HEALTH_PATH = process.env.HEALTH_PATH || "/health";
-
-const PAY_TO =
-  process.env.PAY_TO || "0x6CB857A62f6a55239D67C6bD1A8ed5671605566D";
-const PRICE_BASIC = Number(process.env.PRICE_BASIC || "0.25");
 
 const OWNER_ID = Number(process.env.TEOS_OWNER_ID || "0");
 
+const PAY_TO =
+  process.env.PAY_TO || "0x6CB857A62f6a55239D67C6bD1A8ed5671605566D";
+
+// pricing (pay-per-scan UX)
+const PRICE_SCAN_MIN = Number(process.env.PRICE_SCAN_MIN || "0.25"); // example: 0.25 USDC per scan
+const PRICE_SCAN_MAX = Number(process.env.PRICE_SCAN_MAX || "1"); // example: up to 1 USDC for heavy/advanced tiers
+
+// free scans per Telegram account (lifetime)
 const FREE_SCANS = Number(process.env.FREE_SCANS || "5");
-const RATE_LIMIT_SECONDS = Number(process.env.RATE_LIMIT_SECONDS || "120");
+
+// rate limiting
+const RL_WINDOW_MS = Number(process.env.RL_WINDOW_MS || String(2 * 60 * 1000)); // 2 minutes
+const RL_MAX_REQ = Number(process.env.RL_MAX_REQ || "3"); // allow 3 scans per window
 
 if (!TG_TOKEN) throw new Error("Missing TG_TOKEN");
 if (!API_BASE_URL) throw new Error("Missing API_BASE_URL");
 if (!TEOS_BOT_KEY) throw new Error("Missing TEOS_BOT_KEY");
 
-console.log("BOT VERSION 1.1.0 LOADED ✅");
+console.log("TEOS BOT VERSION 1.1.0 LOADED ✅");
 console.log("API_BASE_URL:", API_BASE_URL);
 console.log("ANALYZE_PATH:", ANALYZE_PATH);
 console.log("OWNER_ID:", OWNER_ID || "not set");
-console.log("FREE_SCANS:", FREE_SCANS);
-console.log("RATE_LIMIT_SECONDS:", RATE_LIMIT_SECONDS);
 
-/**
- * =========================
- * STORAGE (JSON)
- * =========================
- * data.json structure:
- * { users: { [telegramId]: { scans_used: number, is_paid: boolean, last_scan_ts?: number } } }
- *
- * NOTE: On Koyeb, filesystem can reset after redeploy.
- * For production, attach a Volume later. For now it's OK for MVP.
- */
+// ---- DB (JSON) ----
+// NOTE: On Koyeb, file system can reset between deploys.
+// For production persistence, attach a volume later.
+// For now it is fine for funnel/free-tier.
 const DB_FILE = "./data.json";
+const DB_TMP = "./data.json.tmp";
 
 async function loadDB() {
   try {
     const raw = await fs.readFile(DB_FILE, "utf8");
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed.users) parsed.users = {};
+    return parsed;
   } catch {
     return { users: {} };
   }
 }
 
 async function saveDB(db) {
-  await fs.writeFile(DB_FILE, JSON.stringify(db, null, 2), "utf8");
+  // atomic write
+  await fs.writeFile(DB_TMP, JSON.stringify(db, null, 2), "utf8");
+  await fs.rename(DB_TMP, DB_FILE);
 }
 
 async function getUser(telegramId) {
   const db = await loadDB();
   if (!db.users[telegramId]) {
-    db.users[telegramId] = { scans_used: 0, is_paid: false, last_scan_ts: 0 };
+    db.users[telegramId] = {
+      scans_used: 0,
+      is_paid: false, // reserved for future auto-pay verification
+      rl: { windowStart: 0, count: 0 },
+    };
     await saveDB(db);
+  } else {
+    // backfill fields
+    db.users[telegramId].scans_used ??= 0;
+    db.users[telegramId].is_paid ??= false;
+    db.users[telegramId].rl ??= { windowStart: 0, count: 0 };
   }
   return { db, user: db.users[telegramId] };
 }
 
 function scansLeft(user) {
   if (user.is_paid) return "∞";
-  const left = Math.max(0, FREE_SCANS - (user.scans_used || 0));
-  return String(left);
+  return Math.max(0, FREE_SCANS - (user.scans_used || 0));
 }
 
-/**
- * =========================
- * OWNER HELPERS
- * =========================
- */
 function isOwnerId(telegramId) {
   return OWNER_ID && Number(telegramId) === OWNER_ID;
 }
+
 function isOwnerMsg(msg) {
   return OWNER_ID && msg?.from?.id === OWNER_ID;
 }
 
-/**
- * =========================
- * RATE LIMIT (2 minutes default)
- * =========================
- * Uses per-user last_scan_ts stored in data.json
- */
-async function checkRateLimit(telegramId) {
-  // Owner bypass
-  if (isOwnerId(telegramId)) return { ok: true, waitSeconds: 0 };
-
-  const { db, user } = await getUser(String(telegramId));
+// ---- Rate Limit (per user) ----
+function checkRateLimit(user) {
   const now = Date.now();
-  const last = Number(user.last_scan_ts || 0);
+  const rl = user.rl || { windowStart: 0, count: 0 };
 
-  const elapsed = Math.floor((now - last) / 1000);
-  if (last && elapsed < RATE_LIMIT_SECONDS) {
-    return { ok: false, waitSeconds: RATE_LIMIT_SECONDS - elapsed };
+  if (!rl.windowStart || now - rl.windowStart > RL_WINDOW_MS) {
+    rl.windowStart = now;
+    rl.count = 1;
+    user.rl = rl;
+    return true;
   }
 
-  user.last_scan_ts = now;
-  db.users[String(telegramId)] = user;
-  await saveDB(db);
+  if (rl.count >= RL_MAX_REQ) {
+    user.rl = rl;
+    return false;
+  }
 
-  return { ok: true, waitSeconds: 0 };
+  rl.count += 1;
+  user.rl = rl;
+  return true;
 }
 
-/**
- * =========================
- * HTTP HELPERS
- * =========================
- */
+// ---- HTTP helpers ----
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -142,6 +131,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   }
 }
 
+// ---- MCP call ----
 async function callAnalyze(code) {
   const url = `${API_BASE_URL}${ANALYZE_PATH}`;
   return fetchWithTimeout(
@@ -150,7 +140,7 @@ async function callAnalyze(code) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-teos-bot-key": TEOS_BOT_KEY,
+        "x-teos-bot-key": TEOS_BOT_KEY, // bot bypass on MCP
       },
       body: JSON.stringify({ code, mode: "basic" }),
     },
@@ -158,11 +148,7 @@ async function callAnalyze(code) {
   );
 }
 
-/**
- * =========================
- * BOT INIT
- * =========================
- */
+// ---- Telegram bot ----
 const bot = new TelegramBot(TG_TOKEN, {
   polling: {
     autoStart: false,
@@ -182,241 +168,240 @@ async function start() {
   console.log("Bot started polling ✅");
 }
 
-/**
- * =========================
- * CORE SCAN LOGIC
- * =========================
- */
+// ---- Core scan logic ----
 async function scanCode(chatId, telegramId, code) {
-  // 1) Rate limit (per user)
-  const rl = await checkRateLimit(telegramId);
-  if (!rl.ok) {
-    const mins = Math.ceil(rl.waitSeconds / 60);
-    return bot.sendMessage(
-      chatId,
-      `⛔ Too many requests.\nPlease wait ${mins} minute(s) before scanning again.`
-    );
-  }
+  const idStr = String(telegramId);
+  const { db, user } = await getUser(idStr);
 
-  // 2) Load user
-  const { db, user } = await getUser(String(telegramId));
-
-  // 3) Owner bypass (no scan count + ignores free limit)
+  // Owner bypass: unlimited + no rate limit + no quota
   if (isOwnerId(telegramId)) {
-    await bot.sendMessage(chatId, "🔎 Scanning (Founder bypass)...");
-    let res;
+    await bot.sendMessage(chatId, "🔎 Scanning (Founder access)...");
+    return await doAnalyzeAndReply(chatId, code, "∞ (Founder)", null);
+  }
 
-    try {
-      res = await callAnalyze(code);
-    } catch (e) {
-      return bot.sendMessage(
-        chatId,
-        `❌ API timeout/offline.\n${String(e?.message || e)}`
-      );
-    }
-
-    if (res.status === 402) {
-      return bot.sendMessage(
-        chatId,
-        "❌ API returned 402 (Payment Required).\nFix MCP: allow x-teos-bot-key bypass for bot."
-      );
-    }
-
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      return bot.sendMessage(chatId, `❌ API error ${res.status}\n${txt.slice(0, 400)}`);
-    }
-
-    const data = await res.json().catch(() => ({}));
-    const decision = data?.result?.decision || "UNKNOWN";
-    const risk = data?.result?.overallRisk || "Unknown";
-    const reason = data?.result?.reason || data?.result?.summary || "";
-
+  // ✅ Rate limit check (THIS is where your snippet belongs)
+  if (!checkRateLimit(user)) {
+    db.users[idStr] = user;
+    await saveDB(db);
     return bot.sendMessage(
       chatId,
-      `✅ Decision: ${decision}\n` +
-        `⚠️ Risk: ${risk}\n` +
-        (reason ? `🧠 Reason: ${String(reason).slice(0, 500)}\n` : "") +
-        `🎁 Scans left: ∞ (Founder)`
+      "⛔ Too many requests. Please wait 2 minutes before scanning again."
     );
   }
 
-  // 4) Free limit gate
-  if (!user.is_paid && (user.scans_used || 0) >= FREE_SCANS) {
+  // Free tier gate
+  if (!user.is_paid && user.scans_used >= FREE_SCANS) {
+    db.users[idStr] = user;
+    await saveDB(db);
+
     return bot.sendMessage(
       chatId,
-      `⚠️ Free limit reached.\n\n💳 Unlock unlimited scans:\n` +
-        `Amount: ${PRICE_BASIC} USDC\n` +
-        `Pay to: ${PAY_TO}\n\nUse /pay`
+      `⚠️ Free Tier limit reached.\n\n` +
+        `💳 Pay-per-scan pricing:\n` +
+        `• ${PRICE_SCAN_MIN} → ${PRICE_SCAN_MAX} USDC per scan (depending on tier)\n\n` +
+        `Pay to:\n${PAY_TO}\n\n` +
+        `Type /pricing to see tiers.\n` +
+        `Type /pay for payment instructions.`
     );
   }
 
-  // 5) Call MCP
   await bot.sendMessage(chatId, "🔎 Scanning...");
 
+  const ok = await doAnalyzeAndReply(chatId, code, null, user);
+
+  // increment quota only if analyze succeeded & user not paid
+  if (ok && !user.is_paid) {
+    user.scans_used = (user.scans_used || 0) + 1;
+    db.users[idStr] = user;
+    await saveDB(db);
+  } else {
+    // still persist rate-limit window changes
+    db.users[idStr] = user;
+    await saveDB(db);
+  }
+}
+
+async function doAnalyzeAndReply(chatId, code, forcedScansLeftText = null, user = null) {
   let res;
   try {
     res = await callAnalyze(code);
   } catch (e) {
-    return bot.sendMessage(
-      chatId,
-      `❌ API timeout/offline.\n${String(e?.message || e)}`
-    );
+    await bot.sendMessage(chatId, `❌ API timeout/offline.\n${String(e?.message || e)}`);
+    return false;
   }
 
   if (res.status === 402) {
-    return bot.sendMessage(
+    await bot.sendMessage(
       chatId,
-      "❌ API returned 402 (Payment Required).\nFix MCP: allow x-teos-bot-key bypass for bot OR disable requirePayment for bot requests."
+      "❌ API returned 402 (Payment Required).\n" +
+        "Fix TEOS MCP: allow x-teos-bot-key bypass for bot requests."
     );
+    return false;
   }
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    return bot.sendMessage(chatId, `❌ API error ${res.status}\n${txt.slice(0, 400)}`);
+    await bot.sendMessage(chatId, `❌ API error ${res.status}\n${txt.slice(0, 400)}`);
+    return false;
   }
 
   const data = await res.json().catch(() => ({}));
   const decision = data?.result?.decision || "UNKNOWN";
   const risk = data?.result?.overallRisk || "Unknown";
-  const reason = data?.result?.reason || data?.result?.summary || "";
+  const reason =
+    data?.result?.reason ||
+    data?.result?.summary ||
+    (data?.result?.findings?.length ? `Found ${data.result.findings.length} issue(s).` : "No details provided.");
 
-  // 6) Increment scans
-  if (!user.is_paid) {
-    user.scans_used = (user.scans_used || 0) + 1;
-    db.users[String(telegramId)] = user;
-    await saveDB(db);
-  }
+  const leftNow =
+    forcedScansLeftText ??
+    (user ? scansLeft(user) : "—");
 
-  const leftNow = scansLeft(user);
+  // Emoji map
+  const decisionEmoji = decision === "ALLOW" ? "✅" : decision === "WARN" ? "⚠️" : "⛔";
+  const riskEmoji = risk?.toLowerCase() === "critical" ? "🚨" : risk?.toLowerCase() === "high" ? "⚠️" : "🧠";
 
-  return bot.sendMessage(
+  await bot.sendMessage(
     chatId,
-    `✅ Decision: ${decision}\n` +
-      `⚠️ Risk: ${risk}\n` +
-      (reason ? `🧠 Reason: ${String(reason).slice(0, 500)}\n` : "") +
+    `${decisionEmoji} Decision: ${decision}\n` +
+      `${riskEmoji} Risk: ${String(risk).toUpperCase()}\n` +
+      `🧾 Reason: ${String(reason).slice(0, 700)}\n` +
       `🎁 Scans left: ${leftNow}\n\n` +
       `Powered by TEOS MCP:\n${API_BASE_URL}`
   );
+
+  return true;
 }
 
-/**
- * =========================
- * COMMANDS
- * =========================
- */
+// ---- Commands ----
 bot.onText(/^\/start$/, async (msg) => {
   const { user } = await getUser(String(msg.from.id));
   await bot.sendMessage(
     msg.chat.id,
-    `🏺 TEOS MCP — Agent Code Risk Scanner
+`🏺 TEOS MCP — Agent Code Risk Scanner (Free Tier)
 
 Protect autonomous systems before they deploy.
 
-⚠️ Detect:
+Detect:
 • Prompt injection
 • Secret leaks
 • Unsafe eval()
 • Agent autonomy risks
 • Tool misuse patterns
 
-🎁 Free scans: ${FREE_SCANS}
+🎁 Free Tier: ${FREE_SCANS} scans per account (lifetime)
 Remaining: ${scansLeft(user)}
 
-📌 How to use:
-1) Paste any code snippet OR use /scan <code>
-2) Receive risk classification
-3) Fix vulnerabilities before production
+How to use:
+1) Paste code snippet OR /scan <code>
+2) Receive decision + risk
+3) Fix before production
 
-Type /help for detailed usage guide.`
+Type /help for full guide.`
   );
 });
 
 bot.onText(/^\/help$/, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
-    `🧠 How To Use TEOS MCP
+`🧠 How To Use TEOS MCP (Telegram)
 
 ✅ Fast scan:
   /scan <your code>
 
-✅ Or paste code directly as a normal message (no /)
+✅ Or paste code directly (no /)
 
-Example:
+Examples:
   /scan eval(userInput)
+  paste: import { exec } from "child_process";
 
 Commands:
-/start - Start bot
-/help - Usage guide
-/scan - Scan code
-/ping - Check API status
-/balance - View scan usage
-/pay - Unlock unlimited scans`
+/start   - Start bot
+/help    - Usage guide
+/scan    - Scan code
+/ping    - Check API status
+/balance - View Free Tier usage
+/pricing - View tiers
+/pay     - Payment instructions`
+  );
+});
+
+bot.onText(/^\/pricing$/, async (msg) => {
+  await bot.sendMessage(
+    msg.chat.id,
+`💳 Pricing (Pay-per-scan)
+
+Free Tier:
+• ${FREE_SCANS} scans per account (lifetime)
+
+After Free Tier:
+• ${PRICE_SCAN_MIN} → ${PRICE_SCAN_MAX} USDC per scan (depending on tier / mode)
+
+Pay to:
+${PAY_TO}
+
+Note: Monthly/Yearly subscriptions are available on the main TEOS platform (TeosPump/TeosMcp).`
   );
 });
 
 bot.onText(/^\/balance$/, async (msg) => {
   if (isOwnerMsg(msg)) {
-    return bot.sendMessage(
+    await bot.sendMessage(
       msg.chat.id,
-      `📊 Status\nPaid: YES\nScans used: ∞\nScans left: ∞ (Founder bypass active)`
+      `📊 Status\nAccess: FOUNDER\nScans used: ∞\nScans left: ∞`
     );
+    return;
   }
 
   const { user } = await getUser(String(msg.from.id));
-  return bot.sendMessage(
+  await bot.sendMessage(
     msg.chat.id,
-    `📊 Status\nPaid: ${user.is_paid ? "YES" : "NO"}\nScans used: ${
-      user.scans_used || 0
-    }\nScans left: ${scansLeft(user)}`
+    `📊 Status\nFree Tier used: ${user.scans_used}/${FREE_SCANS}\nScans left: ${scansLeft(user)}`
   );
 });
 
 bot.onText(/^\/pay$/, async (msg) => {
   if (isOwnerMsg(msg)) {
-    return bot.sendMessage(msg.chat.id, "Founder bypass active — no payment required.");
+    await bot.sendMessage(msg.chat.id, "Founder access — no payment required.");
+    return;
   }
 
-  return bot.sendMessage(
+  await bot.sendMessage(
     msg.chat.id,
-    `💳 Payment
-
-Send ${PRICE_BASIC} USDC to:
-${PAY_TO}
-
-After payment we will enable unlimited scans (auto verification comes next).`
+    `💳 Payment Instructions\n\n` +
+      `Send ${PRICE_SCAN_MIN} USDC (or more based on tier) to:\n` +
+      `${PAY_TO}\n\n` +
+      `Then use /pricing to choose your tier.\n` +
+      `Auto-verification can be added next.`
   );
 });
 
 bot.onText(/^\/ping$/, async (msg) => {
   try {
-    const res = await fetchWithTimeout(
-      `${API_BASE_URL}${HEALTH_PATH}`,
-      { method: "GET" },
-      8000
-    );
+    const res = await fetchWithTimeout(`${API_BASE_URL}/health`, { method: "GET" }, 8000);
     const txt = await res.text().catch(() => "");
-    return bot.sendMessage(msg.chat.id, `✅ API ping: ${res.status}\n${txt.slice(0, 500)}`);
+    await bot.sendMessage(msg.chat.id, `✅ API ping: ${res.status}\n${txt.slice(0, 300)}`);
   } catch (e) {
-    return bot.sendMessage(msg.chat.id, `❌ API ping failed: ${String(e?.message || e)}`);
+    await bot.sendMessage(msg.chat.id, `❌ API ping failed: ${String(e?.message || e)}`);
   }
 });
 
-// /scan <code> (supports multiline)
+// /scan <code>
 bot.onText(/^\/scan(?:\s+([\s\S]+))?$/m, async (msg, match) => {
   const code = (match?.[1] || "").trim();
   if (!code) {
-    return bot.sendMessage(msg.chat.id, "Send like this:\n/scan eval(userInput)");
+    await bot.sendMessage(msg.chat.id, "Send like this:\n/scan eval(userInput)");
+    return;
   }
-  return scanCode(msg.chat.id, msg.from.id, code);
+  await scanCode(msg.chat.id, msg.from.id, code);
 });
 
 // Default: scan any non-command text
 bot.on("message", async (msg) => {
   const text = msg.text || "";
   if (!text) return;
-  if (text.startsWith("/")) return; // commands handled above
-  return scanCode(msg.chat.id, msg.from.id, text);
+  if (text.startsWith("/")) return;
+  await scanCode(msg.chat.id, msg.from.id, text);
 });
 
 // Polling errors
