@@ -1,122 +1,143 @@
+<div align="center">
 
+# 🏺 TEOS Risk Analyzer Bot (Telegram)
 
-# 🏺 TEOS Linker Bot
+Telegram gateway for **TEOS MCP — Agent Code Risk MCP**.  
+Paste code → get **ALLOW / WARN / BLOCK** decision + risk level.
 
-Telegram gateway for **TEOS MCP — Agent Code Risk Scanner**
-
-This bot allows developers to scan code directly from Telegram using the live TEOS MCP engine.
-
-It acts as a secure gateway between Telegram users and the production MCP server.
-
----
-
-## 🚀 Live System Architecture
-
-Telegram User  
-↓  
-TEOS Linker Bot (Koyeb Worker)  
-↓  
-TEOS MCP Server  
-↓  
-Decision Engine + Governance Layer  
+</div>
 
 ---
 
-## 🔎 What It Detects
+## What This Is
 
-- Prompt injection risks
-- Secret/API key leakage
-- Unsafe `eval()` / dynamic execution
-- Agent autonomy abuse
-- Tool misuse patterns
-- Governance violations
+This bot is a **Free Tier access layer** to the live TEOS MCP infrastructure.
 
----
+- **5 free scans per Telegram account (lifetime)**
+- After that, users continue on the web platform:
+  - Pricing: https://app.teosegypt.com/pricing
+  - Stats: https://app.teosegypt.com/stats
 
-## 🎁 Free Tier
-
-- Default: 5 free scans
-- Rate limited (2 min cooldown)
-- Paid unlock for unlimited scans
+This bot is designed as an onboarding channel.  
+Billing, subscriptions, and API access are managed on the main TEOS MCP platform.
 
 ---
 
-## 🔐 Security Features
+## Monetization Roadmap
 
-- Shared secret header (`x-teos-bot-key`)
-- Per-user rate limiting
-- Free-tier enforcement
-- Owner bypass control
-- Timeout-protected MCP calls
-- No secret logging
+### Phase 1 — Free Tier + Pay-Per-Scan (Live)
+
+- 5 free scans per Telegram account
+- Pay-per-scan via MCP
+- No subscription required
+- Designed for developers and agents
+
+### Phase 2 — Subscription Plans (Planned)
+
+Upcoming additions on the TEOS MCP platform:
+
+- Monthly subscriptions
+- Yearly subscriptions (discounted)
+- API key management
+- Usage dashboard
+- Team accounts
+- CI/CD integration tiers
+
+Telegram will remain a Free Tier funnel only.
 
 ---
 
-## 📦 Environment Variables (Koyeb)
+## Recommended Pricing Structure
+
+### Pay-Per-Scan (Agent Native)
+- $0.25 — Basic scan
+- $0.50 — Advanced scan
+- $1.00 — Enterprise scan (policy + extended analysis)
+
+### Subscription Plans (Phase 2)
+
+| Plan        | Price        | Included Scans | Target User |
+|------------|-------------|---------------|-------------|
+| Developer  | $29/month   | 300 scans     | Solo builders |
+| Pro        | $99/month   | 2,000 scans   | Teams |
+| Business   | $299/month  | 10,000 scans  | CI/CD pipelines |
+| Enterprise | Custom      | Unlimited     | Organizations |
+
+Yearly plans: 20% discount recommended.
+
+---
+
+## Timeline Recommendation
+
+**Week 1–2**
+- Stabilize MCP
+- Enable real signup + API keys
+- Keep Telegram as Free Tier funnel
+
+**Week 3–4**
+- Launch subscription system
+- Add Stripe monthly billing
+- Add usage dashboard
+
+**Month 2**
+- Launch public subscription
+- Introduce team plans
+- Push Product Hunt / Hacker News
+
+---
+
+## Commands
+
+- `/start` — start bot
+- `/help` — usage guide
+- `/scan <code>` — scan code
+- paste code directly — scan without command
+- `/balance` — show Free Tier usage
+- `/pricing` — show pricing link
+- `/ping` — check MCP server health
+
+---
+
+## Powered By
+
+- TEOS MCP: https://app.teosegypt.com
+- Organization-wide security & disclosure rules:
+  https://github.com/Elmahrosa/.github/blob/main/SECURITY.md
+
+---
+
+## Deployment (Koyeb)
+
+- Service type: Worker
+- Builder: Dockerfile
+- Instance: Nano
+- Autoscaling: disabled (1 instance recommended)
+
+If environment variables change → deploy without rebuild  
+If code changes → deploy with rebuild
+
+---
+
+## Environment Variables
 
 Required:
+- `TG_TOKEN`
+- `API_BASE_URL`
+- `TEOS_BOT_KEY`
+- `TEOS_OWNER_ID`
 
-TG_TOKEN API_BASE_URL TEOS_BOT_KEY
-
-Optional / Configurable:
-
-ANALYZE_PATH=/analyze HEALTH_PATH=/health FREE_SCANS=5 RATE_LIMIT_SECONDS=120 PRICE_BASIC=0.25 PAY_TO=0x6CB857A62f6a55239D67C6bD1A8ed5671605566D TEOS_OWNER_ID=YOUR_TELEGRAM_ID
-
----
-
-## 🛠 Deployment (Koyeb)
-
-- Service Type: Worker
-- Builder: Dockerfile
-- Instance: Nano (0.25 vCPU / 256MB RAM)
-- Region: EU (Paris or Frankfurt)
-- Scaling: Fixed (1 instance)
-
-After changing environment variables:
-→ Use **Without rebuild**
-
-After changing code:
-→ Use **With build**
+Optional:
+- `FREE_SCANS`
+- `RL_WINDOW_MS`
+- `RL_MAX_REQ`
+- `PAY_TO`
+- `PRICE_SCAN_MIN`
+- `PRICE_SCAN_MAX`
 
 ---
 
-## 🧠 Usage
+## Notes
 
-Start bot:
-
-/start
-
-Scan code:
-
-/scan eval(userInput)
-
-Or paste any code directly.
-
-Check status:
-
-/balance
-
-Check API:
-
-/ping
-
----
-
-## ⚠️ Notes
-
-Filesystem storage uses `data.json`.  
-For production persistence, attach a Koyeb Volume or migrate to SQLite.
-
----
-
-## 🔗 Powered by
-
-TEOS MCP  
-https://app.teosegypt.com
-
----
-
-© Elmahrosa — Sovereign Agent Governance
-
-
----
+- Telegram bot is a Free Tier gateway.
+- Subscriptions will be added in Phase 2 on the web platform.
+- Revenue from TEOS MCP supports long-term ecosystem development.
