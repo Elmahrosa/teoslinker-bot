@@ -1,3 +1,25 @@
+const rateLimits = new Map();
+
+function checkRateLimit(userId) {
+  const now = Date.now();
+  const windowMs = 2 * 60 * 1000; // 2 minutes
+  const maxRequests = 5;
+
+  if (!rateLimits.has(userId)) {
+    rateLimits.set(userId, []);
+  }
+
+  const timestamps = rateLimits.get(userId)
+    .filter(ts => now - ts < windowMs);
+
+  if (timestamps.length >= maxRequests) {
+    return false;
+  }
+
+  timestamps.push(now);
+  rateLimits.set(userId, timestamps);
+  return true;
+}
 import TelegramBot from "node-telegram-bot-api";
 import fetch from "node-fetch";
 import fs from "fs/promises";
