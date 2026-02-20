@@ -120,26 +120,3 @@ https://app.teosegypt.com
 
 
 ---
-
-✅ Your 8 Environment Variables (Final List)
-
-In Koyeb → Settings → Environment Variables
-
-Add exactly these:
-
-TG_TOKEN=your_real_telegram_token
-API_BASE_URL=https://app.teosegypt.com
-TEOS_BOT_KEY=long_random_shared_secret_32+chars
-ANALYZE_PATH=/analyze
-HEALTH_PATH=/health
-FREE_SCANS=5
-RATE_LIMIT_SECONDS=120
-TEOS_OWNER_ID=8229874922
-
-Optional monetization vars:
-
-PRICE_BASIC=0.25
-PAY_TO=0x6CB857A62f6a55239D67C6bD1A8ed5671605566D
-
-
----
