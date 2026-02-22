@@ -1,143 +1,230 @@
-<div align="center">
+# 🔗 TeosLinker
 
-# 🏺 TEOS Risk Analyzer Bot (Telegram)
+> On-chain risk monitoring and execution guard for autonomous agents
 
-Telegram gateway for **TEOS MCP — Agent Code Risk MCP**.  
-Paste code → get **ALLOW / WARN / BLOCK** decision + risk level.
-
-</div>
-
----
-
-## What This Is
-
-This bot is a **Free Tier access layer** to the live TEOS MCP infrastructure.
-
-- **5 free scans per Telegram account (lifetime)**
-- After that, users continue on the web platform:
-  - Pricing: https://app.teosegypt.com/pricing
-  - Stats: https://app.teosegypt.com/stats
-
-This bot is designed as an onboarding channel.  
-Billing, subscriptions, and API access are managed on the main TEOS MCP platform.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue.svg)](https://modelcontextprotocol.io)
+[![Telegram Bot](https://img.shields.io/badge/Telegram-Bot-blue.svg)](https://t.me/teoslinker)
+[![Status: Live](https://img.shields.io/badge/Status-Live-green.svg)]()
 
 ---
 
-## Monetization Roadmap
+## What Is This?
 
-### Phase 1 — Free Tier + Pay-Per-Scan (Live)
+Your agent is about to execute an on-chain transaction.  
+**But is the chain state safe right now?**
 
-- 5 free scans per Telegram account
-- Pay-per-scan via MCP
-- No subscription required
-- Designed for developers and agents
+`teoslinker` watches the blockchain and tells your agent:
+- ✅ **ALLOW** — conditions are safe, proceed
+- 🚫 **BLOCK** — anomaly detected, stop and alert
 
-### Phase 2 — Subscription Plans (Planned)
-
-Upcoming additions on the TEOS MCP platform:
-
-- Monthly subscriptions
-- Yearly subscriptions (discounted)
-- API key management
-- Usage dashboard
-- Team accounts
-- CI/CD integration tiers
-
-Telegram will remain a Free Tier funnel only.
+Real-time. Deterministic. Agent-native.
 
 ---
 
-## Recommended Pricing Structure
+## Features
 
-### Pay-Per-Scan (Agent Native)
-- $0.25 — Basic scan
-- $0.50 — Advanced scan
-- $1.00 — Enterprise scan (policy + extended analysis)
-
-### Subscription Plans (Phase 2)
-
-| Plan        | Price        | Included Scans | Target User |
-|------------|-------------|---------------|-------------|
-| Developer  | $29/month   | 300 scans     | Solo builders |
-| Pro        | $99/month   | 2,000 scans   | Teams |
-| Business   | $299/month  | 10,000 scans  | CI/CD pipelines |
-| Enterprise | Custom      | Unlimited     | Organizations |
-
-Yearly plans: 20% discount recommended.
+| Feature | Description |
+|---------|-------------|
+| 🔍 Contract monitoring | Watch any contract for state changes |
+| 💧 Liquidity alerts | Alert when liquidity drops below threshold |
+| 📊 Price deviation | Block execution if price moves too far |
+| ⚡ MEV detection | Detect sandwich attacks before they happen |
+| 🤖 MCP interface | Native tool for AI agent pipelines |
+| 📱 Telegram alerts | Real-time notifications to your phone |
 
 ---
 
-## Timeline Recommendation
+## Quick Start
 
-**Week 1–2**
-- Stabilize MCP
-- Enable real signup + API keys
-- Keep Telegram as Free Tier funnel
+### Option A: Telegram Bot (Easiest)
 
-**Week 3–4**
-- Launch subscription system
-- Add Stripe monthly billing
-- Add usage dashboard
+1. Open Telegram → search `@TeosLinkerBot`
+2. Send `/start`
+3. Add a contract to watch: `/watch 0xYourContract`
+4. Get alerts when anomalies are detected
 
-**Month 2**
-- Launch public subscription
-- Introduce team plans
-- Push Product Hunt / Hacker News
+### Option B: MCP Server (For Agents)
+
+```bash
+npx @elmahrosa/teos-mcp-linker
+```
+
+Add to your MCP config:
+```json
+{
+  "mcpServers": {
+    "linker": {
+      "command": "npx",
+      "args": ["@elmahrosa/teos-mcp-linker"]
+    }
+  }
+}
+```
+
+### Option C: Self-hosted
+
+```bash
+git clone https://github.com/Elmahrosa/teoslinker-bot
+cd teoslinker-bot
+cp .env.example .env
+# Fill in your RPC URL and Telegram bot token
+npm install
+npm start
+```
 
 ---
 
-## Commands
+## MCP Tools
 
-- `/start` — start bot
-- `/help` — usage guide
-- `/scan <code>` — scan code
-- paste code directly — scan without command
-- `/balance` — show Free Tier usage
-- `/pricing` — show pricing link
-- `/ping` — check MCP server health
+### `check_alert_threshold`
+
+Query current chain safety before your agent acts.
+
+**Input:**
+```json
+{
+  "contract": "0x...",
+  "condition": "liquidity | price | state",
+  "threshold": 0.05
+}
+```
+
+**Output:**
+```json
+{
+  "verdict": "ALLOW | BLOCK",
+  "current_value": 0.03,
+  "threshold": 0.05,
+  "reasoning": "Liquidity within normal range",
+  "timestamp": "2026-02-22T12:56:00Z"
+}
+```
+
+### `monitor_contract`
+
+Start watching a contract for changes.
+
+**Input:**
+```json
+{
+  "contract": "0x...",
+  "events": ["Transfer", "Approval"],
+  "webhook": "https://your-endpoint.com/alert"
+}
+```
 
 ---
 
-## Powered By
+## What TeosLinker Detects
 
-- TEOS MCP: https://app.teosegypt.com
-- Organization-wide security & disclosure rules:
-  https://github.com/Elmahrosa/.github/blob/main/SECURITY.md
+| Risk Type | Description |
+|-----------|-------------|
+| 💧 Liquidity drain | Sudden drop in pool liquidity |
+| 📉 Price manipulation | Abnormal price movement |
+| 🥪 MEV / Sandwich | Front-running detection |
+| 🚨 Rug pull signals | Large owner withdrawals |
+| ⏸️ Contract pause | Protocol emergency stops |
+| 🔄 State anomaly | Unexpected contract state changes |
 
 ---
 
-## Deployment (Koyeb)
+## Configuration
 
-- Service type: Worker
-- Builder: Dockerfile
-- Instance: Nano
-- Autoscaling: disabled (1 instance recommended)
+```yaml
+# teoslinker.config.yaml
+networks:
+  - ethereum
+  - base
+  - arbitrum
 
-If environment variables change → deploy without rebuild  
-If code changes → deploy with rebuild
+alerts:
+  telegram:
+    enabled: true
+    chat_id: YOUR_CHAT_ID
+  webhook:
+    enabled: false
+    url: ""
+
+thresholds:
+  liquidity_drop: 10%      # Alert if liquidity drops 10%
+  price_deviation: 5%      # Alert if price moves 5%
+  large_transfer: 100000   # Alert on transfers > $100K
+```
+
+---
+
+## Use Cases
+
+- **Trading agents** — Check market conditions before every trade
+- **Yield farming bots** — Detect liquidity shifts before they hurt you
+- **DAO executors** — Validate chain state before executing proposals
+- **DeFi monitoring** — 24/7 watch on your protocol
+
+---
+
+## Pricing
+
+| Plan | Contracts | Alerts/month | Price |
+|------|-----------|--------------|-------|
+| Free | 3 | 1,000 | $0 |
+| Pro | 50 | 100,000 | $99/month |
+| Enterprise | Unlimited | Unlimited | $2,000+/month |
+
+---
+
+## Part of TeosMCP Ecosystem
+
+TeosLinker is the **on-chain safety layer** of TeosMCP.
+
+```
+CodeGuard MCP  → checks CODE risk before execution
+TeosLinker     → checks ON-CHAIN risk before execution
+TeosMCP Core   → combines both into one ALLOW/BLOCK verdict
+```
+
+➡️ See [TEOS_ECOSYSTEM.md](./TEOS_ECOSYSTEM.md) for full architecture.
 
 ---
 
 ## Environment Variables
 
-Required:
-- `TG_TOKEN`
-- `API_BASE_URL`
-- `TEOS_BOT_KEY`
-- `TEOS_OWNER_ID`
+```env
+# Required
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+RPC_URL_ETHEREUM=https://mainnet.infura.io/v3/YOUR_KEY
 
-Optional:
-- `FREE_SCANS`
-- `RL_WINDOW_MS`
-- `RL_MAX_REQ`
-- `PAY_TO`
-- `PRICE_SCAN_MIN`
-- `PRICE_SCAN_MAX`
+# Optional
+RPC_URL_BASE=https://mainnet.base.org
+RPC_URL_ARBITRUM=https://arb1.arbitrum.io/rpc
+WEBHOOK_SECRET=your_webhook_secret
+PORT=3000
+```
 
 ---
 
-## Notes
+## Contributing
 
-- Telegram bot is a Free Tier gateway.
-- Subscriptions will be added in Phase 2 on the web platform.
-- Revenue from TEOS MCP supports long-term ecosystem development.
+1. Fork this repo
+2. `git checkout -b feature/your-feature`
+3. Make changes + add tests
+4. Open a Pull Request
+
+---
+
+## Contact
+
+- 🐦 X: [@elmahrosa](https://x.com/elmahrosa)
+- 🤖 Telegram: [@TeosLinkerBot](https://t.me/teoslinker)
+- 🐛 Issues: [GitHub Issues](https://github.com/Elmahrosa/teoslinker-bot/issues)
+- 💼 Design partners: DM on X (3 slots open)
+
+---
+
+## License
+
+MIT — See [LICENSE](./LICENSE)
+
+---
+
+*Watch the chain. Guard the execution. Trust the verdict.*
