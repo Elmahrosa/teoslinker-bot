@@ -1,20 +1,20 @@
 # 🔗 TeosLinker
 
-> On-chain risk monitoring and execution guard for autonomous agents
+> On-chain risk monitoring + execution guard for autonomous AI agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue.svg)](https://modelcontextprotocol.io)
 [![Telegram Bot](https://img.shields.io/badge/Telegram-Bot-blue.svg)](https://t.me/teoslinker)
-[![Status: Live](https://img.shields.io/badge/Status-Live-green.svg)]()
+[![Part of TeosMCP](https://img.shields.io/badge/TeosMCP-Ecosystem-orange.svg)](https://github.com/Elmahrosa/agent-code-risk-mcp/blob/main/TEOS_ECOSYSTEM.md)
 
 ---
 
 ## What Is This?
 
-Your agent is about to execute an on-chain transaction.  
+Your agent is about to execute an on-chain transaction.
 **But is the chain state safe right now?**
 
-`teoslinker` watches the blockchain and tells your agent:
+TeosLinker watches the blockchain and tells your agent:
 - ✅ **ALLOW** — conditions are safe, proceed
 - 🚫 **BLOCK** — anomaly detected, stop and alert
 
@@ -41,28 +41,10 @@ Real-time. Deterministic. Agent-native.
 
 1. Open Telegram → search `@TeosLinkerBot`
 2. Send `/start`
-3. Add a contract to watch: `/watch 0xYourContract`
+3. Add a contract: `/watch 0xYourContract`
 4. Get alerts when anomalies are detected
 
-### Option B: MCP Server (For Agents)
-
-```bash
-npx @elmahrosa/teos-mcp-linker
-```
-
-Add to your MCP config:
-```json
-{
-  "mcpServers": {
-    "linker": {
-      "command": "npx",
-      "args": ["@elmahrosa/teos-mcp-linker"]
-    }
-  }
-}
-```
-
-### Option C: Self-hosted
+### Option B: Self-hosted
 
 ```bash
 git clone https://github.com/Elmahrosa/teoslinker-bot
@@ -71,6 +53,13 @@ cp .env.example .env
 # Fill in your RPC URL and Telegram bot token
 npm install
 npm start
+```
+
+### Option C: Docker
+
+```bash
+docker build -t teoslinker .
+docker run -e TELEGRAM_BOT_TOKEN=xxx -e RPC_URL=xxx teoslinker
 ```
 
 ---
@@ -97,20 +86,7 @@ Query current chain safety before your agent acts.
   "current_value": 0.03,
   "threshold": 0.05,
   "reasoning": "Liquidity within normal range",
-  "timestamp": "2026-02-22T12:56:00Z"
-}
-```
-
-### `monitor_contract`
-
-Start watching a contract for changes.
-
-**Input:**
-```json
-{
-  "contract": "0x...",
-  "events": ["Transfer", "Approval"],
-  "webhook": "https://your-endpoint.com/alert"
+  "timestamp": "2026-02-23T06:40:00Z"
 }
 ```
 
@@ -129,27 +105,17 @@ Start watching a contract for changes.
 
 ---
 
-## Configuration
+## Environment Variables
 
-```yaml
-# teoslinker.config.yaml
-networks:
-  - ethereum
-  - base
-  - arbitrum
+```env
+# Required
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+RPC_URL_ETHEREUM=https://mainnet.infura.io/v3/YOUR_KEY
 
-alerts:
-  telegram:
-    enabled: true
-    chat_id: YOUR_CHAT_ID
-  webhook:
-    enabled: false
-    url: ""
-
-thresholds:
-  liquidity_drop: 10%      # Alert if liquidity drops 10%
-  price_deviation: 5%      # Alert if price moves 5%
-  large_transfer: 100000   # Alert on transfers > $100K
+# Optional
+RPC_URL_BASE=https://mainnet.base.org
+RPC_URL_ARBITRUM=https://arb1.arbitrum.io/rpc
+PORT=3000
 ```
 
 ---
@@ -180,26 +146,10 @@ TeosLinker is the **on-chain safety layer** of TeosMCP.
 ```
 CodeGuard MCP  → checks CODE risk before execution
 TeosLinker     → checks ON-CHAIN risk before execution
-TeosMCP Core   → combines both into one ALLOW/BLOCK verdict
+TeosMCP Core   → combines both: one ALLOW/BLOCK verdict
 ```
 
 ➡️ See [TEOS_ECOSYSTEM.md](./TEOS_ECOSYSTEM.md) for full architecture.
-
----
-
-## Environment Variables
-
-```env
-# Required
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-RPC_URL_ETHEREUM=https://mainnet.infura.io/v3/YOUR_KEY
-
-# Optional
-RPC_URL_BASE=https://mainnet.base.org
-RPC_URL_ARBITRUM=https://arb1.arbitrum.io/rpc
-WEBHOOK_SECRET=your_webhook_secret
-PORT=3000
-```
 
 ---
 
@@ -210,14 +160,17 @@ PORT=3000
 3. Make changes + add tests
 4. Open a Pull Request
 
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
+
 ---
 
 ## Contact
 
-- 🐦 X: [@elmahrosa](https://x.com/elmahrosa)
+- 🐦 X: [@king_teos](https://x.com/king_teos)
 - 🤖 Telegram: [@TeosLinkerBot](https://t.me/teoslinker)
 - 🐛 Issues: [GitHub Issues](https://github.com/Elmahrosa/teoslinker-bot/issues)
-- 💼 Design partners: DM on X (3 slots open)
+- 💼 Design partners: DM open (3 slots)
+- 🌐 Website: [app.teosegypt.com](https://app.teosegypt.com)
 
 ---
 
