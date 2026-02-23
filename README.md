@@ -167,7 +167,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
 ## Contact
 
 - 🐦 X: [@king_teos](https://x.com/king_teos)
-- 🤖 Telegram: [@TeosLinkerBot](https://t.me/teoslinker)
+- 🤖 Telegram: [@TeosLinkerBot]([https://t.me/teoslinker](https://t.me/teoslinker_bot))
 - 🐛 Issues: [GitHub Issues](https://github.com/Elmahrosa/teoslinker-bot/issues)
 - 💼 Design partners: DM open (3 slots)
 - 🌐 Website: [app.teosegypt.com](https://app.teosegypt.com)
